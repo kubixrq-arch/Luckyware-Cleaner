@@ -50,12 +50,6 @@
 
 Open `LuckywareCleaner.sln` in Visual Studio 2022 and build in **Release** mode. The YARA rules (`rules/luckyware.yar`) are automatically copied to the output directory.
 
-Alternatively, with CMake:
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-```
-
 ### 🚀 Usage Guide
 
 > [!IMPORTANT]
