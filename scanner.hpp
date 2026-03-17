@@ -122,7 +122,7 @@ inline void save_cache(const CacheMap& cache) {
 
 inline void clear_cache() {
     std::remove(CACHE_FILE.c_str());
-    basari("Cache temizlendi.");
+    basari(t("cache_cleared"));
 }
 
 inline void save_report(const std::vector<std::string>& infected,
@@ -368,9 +368,9 @@ inline ScanResult scan_directory(const std::string& root_path,
                     if (!matches.empty()) {
                         reason = "YARA: " + matches[0].rule_name;
                     } else if (ext == ".vcxproj") {
-                        reason = "PreBuildEvent zararlı kod enjeksiyonu tespit edildi";
+                        reason = t("prebuild_injection");
                     } else {
-                        reason = "Şüpheli dosya içeriği tespit edildi";
+                        reason = t("suspicious_file");
                     }
                 }
 
@@ -385,7 +385,7 @@ inline ScanResult scan_directory(const std::string& root_path,
                             for (auto& m : matches)
                                 tehdit(m.rule_name + ": " + filepath);
                         } else {
-                            tehdit("Şüpheli Yapı Tespit Edildi: " + filepath);
+                            tehdit(t("suspicious_structure", filepath));
                         }
                         std::cout << "    " << C::RED << "[" << t("scan_infection_confirmed")
                                   << "] " << C::RESET << reason << "\n";

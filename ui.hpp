@@ -127,21 +127,21 @@ inline void print_scan_result(int threats, int yara_hits, int files_scanned, dou
     if (threats == 0 && yara_hits == 0) {
         print_shield();
         std::cout << "  " << C::GREEN;
-        type_text("  SISTEM TEMIZ — Hicbir tehdit bulunamadi!", 20);
+        type_text("  " + t("system_clean_toast"), 20);
         std::cout << C::RESET << "\n";
     } else {
         print_skull();
         std::cout << "  " << C::RED;
-        type_text("  TEHDIT TESPIT EDILDI — Temizleme onerilir!", 20);
+        type_text("  " + t("threats_found", std::to_string(threats)), 20);
         std::cout << C::RESET << "\n";
     }
     int mins = static_cast<int>(elapsed_sec) / 60;
     int secs = static_cast<int>(elapsed_sec) % 60;
     std::cout << "\n  " << C::CYAN << "╔═══════════════════════════════════╗" << C::RESET;
-    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  Taranan Dosya  : " << C::YELLOW << std::setw(10) << files_scanned << "   " << C::CYAN << "   ║" << C::RESET;
-    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  Tehdit         : " << (threats > 0 ? C::RED : C::GREEN) << std::setw(10) << threats << "   " << C::CYAN << "   ║" << C::RESET;
-    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  YARA Eslesmesi : " << (yara_hits > 0 ? C::RED : C::GREEN) << std::setw(10) << yara_hits << "   " << C::CYAN << "   ║" << C::RESET;
-    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  Sure           : " << C::GREEN << std::setw(7) << mins << ":" << std::setfill('0') << std::setw(2) << secs << std::setfill(' ') << "" << C::CYAN << "      ║" << C::RESET;
+    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  " << std::left << std::setw(15) << t("scan_scanned") << " : " << C::YELLOW << std::setw(10) << files_scanned << "   " << C::CYAN << "   ║" << C::RESET;
+    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  " << std::setw(15) << t("results_infected") << " : " << (threats > 0 ? C::RED : C::GREEN) << std::setw(10) << threats << "   " << C::CYAN << "   ║" << C::RESET;
+    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  " << std::setw(15) << t("scan_yara_matches") << " : " << (yara_hits > 0 ? C::RED : C::GREEN) << std::setw(10) << yara_hits << "   " << C::CYAN << "   ║" << C::RESET;
+    std::cout << "\n  " << C::CYAN << "║" << C::WHITE << "  " << std::setw(15) << t("results_time", "Sure") << " : " << C::GREEN << std::setw(7) << mins << ":" << std::setfill('0') << std::setw(2) << secs << std::setfill(' ') << "" << C::CYAN << "      ║" << C::RESET;
     std::cout << "\n  " << C::CYAN << "╚═══════════════════════════════════╝" << C::RESET << "\n\n";
 }
 
@@ -250,8 +250,8 @@ public:
             << C::RESET << " " << C::YELLOW << cur << "/" << total << C::RESET
             << " ETA:" << C::GREEN << std::setw(2) << std::setfill('0') << min << ":"
             << std::setw(2) << sec << C::RESET
-            << " TEHDIT:" << C::RED << threats.load() << C::RESET
-            << " YARA:" << C::YELLOW << yara_hits.load() << C::RESET
+            << " " << t("results_infected") << ":" << C::RED << threats.load() << C::RESET
+            << " " << t("scan_yara_matches") << ":" << C::YELLOW << yara_hits.load() << C::RESET
             << "   ";
 
         std::cout << "\033[2K\r" << bar.str() << std::flush;

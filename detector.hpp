@@ -84,7 +84,7 @@ inline MutexScanResult mutex_scan() {
             bilgi(t("mutex_lw_running"));
             result.found_mutexes.push_back(name);
         } else {
-            basari("Temiz: " + name);
+            basari(t("static_mutex", name));
         }
     }
 
@@ -98,8 +98,8 @@ inline MutexScanResult mutex_scan() {
             HANDLE h = OpenMutexA(SYNCHRONIZE, FALSE, test_name.c_str());
             if (h) {
                 CloseHandle(h);
-                tehdit(t("mutex_dynamic_found", test_name));
-                bilgi("  └─ InfDLL dinamik mutex (TheDLL.cpp:117)");
+                tehdit(t("dynamic_mutex_found", test_name));
+                bilgi("  └─ " + t("infdll_mutex"));
                 result.found_mutexes.push_back(test_name);
             }
         }
@@ -137,17 +137,17 @@ inline MutexScanResult mutex_scan() {
             result.malicious_pids[pid] = name;
         }
         if (std::regex_match(name, ox_re)) {
-            tehdit("INFDLL DROPPER SÜRECİ: " + name);
+            tehdit(t("drop_process", name));
             result.found_mutexes.push_back("process:" + name);
             result.malicious_pids[pid] = name;
         }
         if (std::regex_match(name, bk_re)) {
-            tehdit("SDK INFECTOR DROPPER: " + name);
+            tehdit(t("sdk_drop_proc", name));
             result.found_mutexes.push_back("process:" + name);
             result.malicious_pids[pid] = name;
         }
         if (std::regex_match(name, hpsr_re)) {
-            tehdit("IMGUI INFECTOR DROPPER: " + name);
+            tehdit(t("imgui_drop_proc", name));
             result.found_mutexes.push_back("process:" + name);
             result.malicious_pids[pid] = name;
         }
@@ -265,7 +265,7 @@ inline HollowResult hollow_scan() {
     };
 
     for (auto& target : targets) {
-        bilgi("Kontrol: " + C::CYAN + target.name);
+        bilgi(t("check_proc") + C::CYAN + target.name);
 
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (hSnap == INVALID_HANDLE_VALUE) continue;
@@ -284,7 +284,7 @@ inline HollowResult hollow_scan() {
                 std::vector<std::string> anomalies;
 
                 if (pe.cntThreads <= 1) {
-                    anomalies.push_back("Tek thread (\u2264 1) \u2014 CREATE_SUSPENDED belirtisi");
+                    anomalies.push_back(t("single_thread_proc"));
                 }
 
                 HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
@@ -295,16 +295,16 @@ inline HollowResult hollow_scan() {
                         std::transform(actual_path.begin(), actual_path.end(),
                                        actual_path.begin(), ::tolower);
                         if (!actual_path.empty() && actual_path != target.expected_path) {
-                            anomalies.push_back("Sahte yol: " + actual_path);
+                            anomalies.push_back(t("fake_path", actual_path));
                         }
                     } else {
-                        anomalies.push_back("Yol okunamadı (erişim engeli \u2014 hollowing?)");
+                        anomalies.push_back(t("path_unreadable"));
                     }
                     CloseHandle(hProc);
                 }
 
                 if (!anomalies.empty()) {
-                    tehdit("HOLLOW: " + target.name + " PID=" + std::to_string(pid));
+                    tehdit(t("hollow_proc", target.name, std::to_string(pid)));
                     for (auto& a : anomalies)
                         bilgi("  \u2514\u2500 " + C::YELLOW + a + C::RESET);
                     ProcessInfo pi{pid, target.name, ""};
@@ -381,7 +381,7 @@ inline DnsResult dns_bypass_scan() {
 
             char ip_str[16];
             inet_ntop(AF_INET, &row.dwRemoteAddr, ip_str, sizeof(ip_str));
-            bilgi("  \u2514\u2500 Hedef: " + std::string(ip_str) + ":443");
+            bilgi("  \u2514\u2500 " + t("dns_target", std::string(ip_str)));
 
             ProcessInfo pi{pid, proc_name, "dns_doh_bypass"};
             result.found.push_back(pi);
@@ -493,7 +493,7 @@ struct C2Result {
 // 0.0.0.0 the domain is not blocked in HOSTS and is added to found_domains.
 inline C2Result github_c2_check(const std::vector<std::string>& domains) {
     C2Result result;
-    bilgi("GitHub C2 domain kontrolü (HOSTS engel durumu)...");
+    bilgi(t("c2_github_check"));
 
     for (auto& domain : domains) {
         if (domain.empty()) continue;
@@ -512,7 +512,7 @@ inline C2Result github_c2_check(const std::vector<std::string>& domains) {
             }
             std::string ip_str = ip;
             if (ip_str != "0.0.0.0") {
-                uyari("ENGELLENMEMİŞ C2 DOMAIN: " + domain + " → " + ip_str);
+                uyari(t("c2_not_blocked", domain, ip_str));
                 result.found_domains.push_back(domain);
             }
             freeaddrinfo(res);
@@ -527,7 +527,7 @@ inline int block_domains(const std::vector<std::string>& domains) {
 
     std::ifstream rf(hosts_path);
     if (!rf.is_open()) {
-        hata("HOSTS dosyası okunamadı!");
+        hata(t("hosts_read_err"));
         return 0;
     }
     std::string content((std::istreambuf_iterator<char>(rf)),
@@ -537,7 +537,7 @@ inline int block_domains(const std::vector<std::string>& domains) {
     int blocked = 0;
     std::ofstream wf(hosts_path, std::ios::app);
     if (!wf.is_open()) {
-        hata("HOSTS dosyasına yazılamadı! Yönetici yetkisi gerekli.");
+        hata(t("hosts_write_err"));
         return 0;
     }
 
@@ -545,7 +545,7 @@ inline int block_domains(const std::vector<std::string>& domains) {
         if (domain.empty()) continue;
         if (content.find(domain) == std::string::npos) {
             wf << "\n0.0.0.0 " << domain;
-            basari("Engellendi: " + domain);
+            basari(t("hosts_blocked", domain));
             ++blocked;
         }
     }

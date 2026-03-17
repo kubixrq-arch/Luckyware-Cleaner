@@ -40,7 +40,7 @@ inline bool clean_vcxproj(const std::string& path) {
 
     if (std::regex_search(content, prebuild_block)) {
         new_content = std::regex_replace(new_content, prebuild_block, "\n");
-        uyari("<PreBuildEvent> bloğu komple silindi: " + path);
+        uyari(t("prebuild_deleted", path));
         changed = true;
     }
 
@@ -58,7 +58,7 @@ inline bool clean_suo(const std::string& path) {
         basari(t("suo_deleted", path));
         return true;
     } catch (std::exception& e) {
-        hata(std::string("SUO silinemedi: ") + e.what());
+        hata(t("suo_del_err", e.what()));
         return false;
     }
 }
@@ -105,7 +105,7 @@ inline std::vector<std::string> clean_sdk() {
                     content.find("VCCLibraries_") == std::string::npos &&
                     content.find("wfkuuv157wg2gjthwla0lwbo1493h7") == std::string::npos) continue;
 
-                uyari("Enfeksiyon bulundu: " + fpath);
+                uyari(t("sdk_infection_found", fpath));
 
                 // Special handling for winnetwk.h to restore the correct epilogue
                 if (fname == "winnetwk.h") {
@@ -132,7 +132,7 @@ inline std::vector<std::string> clean_sdk() {
                         if (restored != content) {
                             std::ofstream wf(fpath);
                             wf << restored;
-                            basari("SDK dosyası düzeltildi: " + fpath);
+                            basari(t("sdk_file_fixed", fpath));
                             cleaned.push_back(fpath);
                             continue;
                         }
@@ -157,8 +157,8 @@ inline std::vector<std::string> clean_sdk() {
 // Flushes %TEMP% and %TMP% directories to remove staged payloads.
 // Locked files are skipped to avoid permission faults.
 inline void empty_temp_folders() {
-    section("TEMP KLASÖRÜ TEMİZLİĞİ");
-    bilgi("Geçici dosyalar (%TEMP% ve %TMP%) temizleniyor...");
+    section(t("temp_clean_title"));
+    bilgi(t("temp_cleaning"));
 
     std::vector<std::string> temp_vars = {"TEMP", "TMP"};
     int deleted_count = 0;
@@ -189,12 +189,12 @@ inline void empty_temp_folders() {
     }
 
     if (deleted_count > 0) {
-        basari(std::to_string(deleted_count) + " geçici dosya/klasör kalıcı olarak silindi.");
+        basari(t("temp_files_deleted", std::to_string(deleted_count)));
     } else {
-        basari("Temp klasörleri zaten temizdi.");
+        basari(t("temp_already_clean"));
     }
     if (skipped_count > 0) {
-        uyari(std::to_string(skipped_count) + " dosya kilitli olduğu için atlandi (reboot sonrası silinebilir).");
+        uyari(t("temp_files_skipped", std::to_string(skipped_count)));
     }
 }
 
@@ -271,7 +271,7 @@ inline int update_hosts(std::vector<std::string> domains = {
 }) {
     if (domains.empty()) return 0;
     section(t("hosts_title"));
-    bilgi("C2 domainleri HOSTS dosyasina engelleniyor...");
+    bilgi(t("hosts_blocking_c2"));
 
     const std::string hosts_path = "C:\\Windows\\System32\\drivers\\etc\\hosts";
     std::ifstream rf(hosts_path);
@@ -286,14 +286,14 @@ inline int update_hosts(std::vector<std::string> domains = {
     for (auto& dom : domains) {
         if (content.find(dom) == std::string::npos) {
             wf << "\n0.0.0.0 " << dom;
-            uyari("HOSTS engeli eklendi: " + dom);
+            uyari(t("hosts_added_c2", dom));
             added++;
         }
     }
     wf.close();
 
-    if (added > 0) basari(std::to_string(added) + " yeni C2 domaini engellendi.");
-    else basari("Engellenmesi gereken yeni domain yok, hepsi guvende.");
+    if (added > 0) basari(t("hosts_blocked_new", std::to_string(added)));
+    else basari(t("hosts_all_safe"));
 
     return added;
 }
@@ -390,7 +390,7 @@ inline std::string find_winget_id(const std::string& program_name) {
 
 inline bool reinstall_program(const std::string& winget_id) {
     std::string cmd = "winget install --id \"" + winget_id + "\" --accept-package-agreements --accept-source-agreements";
-    std::cout << "  " << C::CYAN << "Çalıştırılıyor: " << C::WHITE << cmd << C::RESET << "\n";
+    std::cout << "  " << C::CYAN << t("winget_running", C::WHITE + cmd + C::RESET) << "\n";
     int ret = std::system(cmd.c_str());
     return ret == 0;
 }
@@ -462,7 +462,7 @@ inline int force_kill_by_name(const std::vector<std::string>& process_names) {
                     HANDLE proc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
                     if (proc) {
                         if (TerminateProcess(proc, 1)) {
-                            uyari("Süreç sonlandırıldı: " + exe_name + " (PID: " + std::to_string(pe.th32ProcessID) + ")");
+                            uyari(t("proc_killed_pid", exe_name, std::to_string(pe.th32ProcessID)));
                             killed++;
                         }
                         CloseHandle(proc);
@@ -480,8 +480,8 @@ inline int force_kill_by_name(const std::vector<std::string>& process_names) {
 // 1. Kill known malware processes + injected host processes
 // ═══════════════════════════════════════════════════════════════════════════════
 inline int kill_malware_processes() {
-    section("ZARARLI SÜREÇ TARAMASİ");
-    bilgi("Bilinen zararlı süreçler taranıyor ve sonlandırılıyor...");
+    section(t("malware_scan_title"));
+    bilgi(t("malware_scanning"));
 
     std::vector<std::string> targets = {
         // Malware payloads
@@ -496,10 +496,10 @@ inline int kill_malware_processes() {
     int killed = force_kill_by_name(targets);
 
     if (killed > 0) {
-        basari(std::to_string(killed) + " zararlı/enjekte süreç sonlandırıldı.");
+        basari(t("malware_killed", std::to_string(killed)));
         Sleep(2000); // Wait for processes to fully exit
     } else {
-        basari("Aktif zararlı süreç bulunamadı.");
+        basari(t("malware_not_found"));
     }
     return killed;
 }
@@ -508,8 +508,8 @@ inline int kill_malware_processes() {
 // 2. Remove known dropped payload files
 // ═══════════════════════════════════════════════════════════════════════════════
 inline int remove_dropped_files() {
-    section("ZARARLI DOSYA TEMİZLİĞİ");
-    bilgi("Bilinen zararlı payload dosyaları temizleniyor...");
+    section(t("payload_clean_title"));
+    bilgi(t("payload_cleaning"));
 
     std::string appdata    = get_env("APPDATA");
     std::string progdata   = get_env("PROGRAMDATA");
@@ -543,15 +543,15 @@ inline int remove_dropped_files() {
             if (fs::exists(fpath)) {
                 try {
                     fs::remove_all(fpath);
-                    uyari("Silindi: " + fpath);
+                    uyari(t("hosts_blocked", fpath)); // Uses blocked/deleted alike
                     removed++;
                 } catch (...) {}
             }
         }
     }
 
-    if (removed > 0) basari(std::to_string(removed) + " zararlı dosya/klasör silindi.");
-    else basari("Bilinen zararlı dosya bulunamadı.");
+    if (removed > 0) basari(t("payload_deleted", std::to_string(removed)));
+    else basari(t("payload_not_found"));
     return removed;
 }
 
@@ -559,17 +559,17 @@ inline int remove_dropped_files() {
 // 3. Discord Hijack Remediation (Terminates processes, strips profapi.dll and injected JS loaders)
 // ═══════════════════════════════════════════════════════════════════════════════
 inline int clean_discord() {
-    section("DISCORD TEMİZLİĞİ");
-    bilgi("Discord enjeksiyon temizliği başlatılıyor...");
+    section(t("discord_clean_title"));
+    bilgi(t("discord_cleaning"));
 
     // Force-close Discord first
-    bilgi("Discord süreçleri kapatılıyor...");
+    bilgi(t("discord_closing"));
     force_kill_by_name({"Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe"});
     Sleep(2000);
 
     std::string localapp = get_env("LOCALAPPDATA");
     if (localapp.empty()) {
-        hata("LOCALAPPDATA okunamadı.");
+        hata(t("discord_no_localapp"));
         return 0;
     }
 
@@ -594,10 +594,10 @@ inline int clean_discord() {
                 if (fs::exists(dll_path)) {
                     try {
                         fs::remove(dll_path);
-                        uyari("Enjekte DLL silindi: " + dll_path);
+                        uyari(t("discord_dll_del", dll_path));
                         cleaned++;
                     } catch (...) {
-                        hata("Silinemedi (kilitli?): " + dll_path);
+                        hata(t("discord_dll_err", dll_path));
                     }
                 }
 
@@ -622,7 +622,7 @@ inline int clean_discord() {
                                 content.find("wfkuuv157wg2gjthwla0lwbo1493h7") != std::string::npos) {
                                 try {
                                     fs::remove(res_entry.path());
-                                    uyari("Zararlı JS silindi: " + res_entry.path().string());
+                                    uyari(t("discord_js_del", res_entry.path().string()));
                                     cleaned++;
                                 } catch (...) {}
                             }
@@ -633,8 +633,8 @@ inline int clean_discord() {
         } catch (...) {}
     }
 
-    if (cleaned > 0) basari(std::to_string(cleaned) + " Discord enjeksiyonu temizlendi.");
-    else basari("Discord temiz, enjeksiyon bulunamadı.");
+    if (cleaned > 0) basari(t("discord_clean_done", std::to_string(cleaned)));
+    else basari(t("discord_already_clean"));
     return cleaned;
 }
 
@@ -642,15 +642,15 @@ inline int clean_discord() {
 // 4. Edge Policy/Data Sanitization (Removes hijacked policy directories from Edge User Data)
 // ═══════════════════════════════════════════════════════════════════════════════
 inline int clean_edge() {
-    section("EDGE HIJACK TEMİZLİĞİ");
-    bilgi("Edge tarayıcı hijack dosyaları kontrol ediliyor...");
+    section(t("edge_clean_title"));
+    bilgi(t("edge_cleaning"));
 
     std::string localapp = get_env("LOCALAPPDATA");
     if (localapp.empty()) return 0;
 
     std::string edge_data = localapp + "\\Microsoft\\Edge\\User Data";
     if (!fs::exists(edge_data)) {
-        basari("Edge veri klasörü bulunamadı, atlanıyor.");
+        basari(t("edge_no_data"));
         return 0;
     }
 
@@ -664,16 +664,16 @@ inline int clean_edge() {
         if (fs::exists(target)) {
             try {
                 fs::remove_all(target);
-                uyari("Edge hijack klasörü silindi: " + target);
+                uyari(t("edge_hijack_del", target));
                 cleaned++;
             } catch (...) {
-                hata("Silinemedi: " + target);
+                hata(t("edge_hijack_err", target));
             }
         }
     }
 
-    if (cleaned > 0) basari(std::to_string(cleaned) + " Edge hijack klasörü temizlendi.");
-    else basari("Edge temiz, hijack bulunamadı.");
+    if (cleaned > 0) basari(t("edge_clean_done", std::to_string(cleaned)));
+    else basari(t("edge_already_clean"));
     return cleaned;
 }
 
@@ -682,8 +682,8 @@ inline int clean_edge() {
 // FULL CLEAN: Runs every cleanup module in the correct order
 // ═══════════════════════════════════════════════════════════════════════════════
 inline void full_clean() {
-    section("TAM TEMİZLİK MODU");
-    bilgi("Tüm temizleme modülleri sırasıyla çalıştırılıyor...\n");
+    section(t("full_clean_title"));
+    bilgi(t("full_clean_starting"));
 
     kill_malware_processes();
     remove_dropped_files();
@@ -696,7 +696,7 @@ inline void full_clean() {
     empty_temp_folders();
 
     std::cout << "\n";
-    basari("═══ TAM TEMİZLİK TAMAMLANDI ═══");
+    basari(t("full_clean_done"));
 }
 
 } // namespace Cleaner

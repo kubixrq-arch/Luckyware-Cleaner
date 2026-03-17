@@ -189,31 +189,31 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 hata(t("no_scan_path"));
-                std::cout << "  LuckywareCleaner.exe C:\\ --rules rules\\luckyware.yar [seçenekler]\n";
-                std::cout << "\nEn iyi temizleme komutu:\n";
+                std::cout << "  LuckywareCleaner.exe C:\\ --rules rules\\luckyware.yar [options]\n";
+                std::cout << "\n" << t("best_clean_command") << "\n";
                 std::cout << "  LuckywareCleaner.exe C:\\ --block --patch-pe --remove --full-clean\n";
-                std::cout << "\nSeçenekler:\n";
-                std::cout << "  --block           C2 domainlerini HOSTS'a engelle\n";
-                std::cout << "  --remove          Enfekte dosyaları otomatik temizle\n";
-                std::cout << "  --patch-pe        Zararlı PE bölümlerini patch'le\n";
-                std::cout << "  --kill-process    Zararlı süreçleri sonlandır\n";
-                std::cout << "  --unblock         HOSTS'tan Luckyware engellerini kaldır\n";
-                std::cout << "  --clean-registry  Registry'den zararlı Run kayıtlarını sil\n";
-                std::cout << "  --clean-sdk       windows.h'dan VccLibaries'i kaldır\n";
-                std::cout << "  --clean-imgui     imgui_impl_win32.cpp'den hex payload'ı kaldır\n";
-                std::cout << "  --clean-discord   Discord enjeksiyonlarını temizle\n";
-                std::cout << "  --full-clean      Tüm temizleme modüllerini çalıştır\n";
-                std::cout << "  --rules <dosya>   YARA kural dosyası (varsayılan: rules\\luckyware.yar)\n";
-                std::cout << "  --lang tr|en      Dil seçimi\n";
-                std::cout << "  --clear-cache     SHA256 cache'i temizle\n";
-                std::cout << "  --debug           Hata ayıklama modu\n";
+                std::cout << "\n" << t("options_title") << "\n";
+                std::cout << "  --block           " << t("opt_block") << "\n";
+                std::cout << "  --remove          " << t("opt_remove") << "\n";
+                std::cout << "  --patch-pe        " << t("opt_patch_pe") << "\n";
+                std::cout << "  --kill-process    " << t("opt_kill_process") << "\n";
+                std::cout << "  --unblock         " << t("opt_unblock") << "\n";
+                std::cout << "  --clean-registry  " << t("opt_clean_registry") << "\n";
+                std::cout << "  --clean-sdk       " << t("opt_clean_sdk") << "\n";
+                std::cout << "  --clean-imgui     " << t("opt_clean_imgui") << "\n";
+                std::cout << "  --clean-discord   " << t("opt_clean_discord") << "\n";
+                std::cout << "  --full-clean      " << t("opt_full_clean") << "\n";
+                std::cout << "  --rules <file>    " << t("opt_rules") << "\n";
+                std::cout << "  --lang tr|en      " << t("opt_lang") << "\n";
+                std::cout << "  --clear-cache     " << t("opt_clear_cache") << "\n";
+                std::cout << "  --debug           " << t("opt_debug") << "\n";
                 WSACleanup();
                 return 1;
             }
         }
 
         if (!fs::exists(args.scan_path)) {
-            hata("Tarama yolu bulunamadı: " + args.scan_path);
+            hata(t("scan_path_not_found") + args.scan_path);
             if (argc <= 1) {
                 std::cout << "\n";
                 bilgi(t("press_enter"));
@@ -234,8 +234,9 @@ int main(int argc, char* argv[]) {
         std::vector<YaraEngine::YaraRule> rules;
         if (!rules_file.empty()) {
             rules = YaraEngine::load_rules(rules_file);
+            std::string rules_size_str = std::to_string(rules.size()) + " " + t("scan_unit");
             bilgi(t("scan_yara_loaded",
-                   rules_file + " (" + std::to_string(rules.size()) + " kural)"));
+                   rules_file + " (" + rules_size_str + ")"));
         }
         std::cout << "\n";
 
@@ -313,9 +314,9 @@ int main(int argc, char* argv[]) {
             auto c2_domains = YaraEngine::extract_domains(rules);
             auto c2_result = Detector::github_c2_check(c2_domains);
             if (!c2_result.found_domains.empty()) {
-                tehdit("AKTİF C2 DOMAIN: " + std::to_string(c2_result.found_domains.size()) + " domain engellenmemiş!");
+                tehdit(t("c2_active_warning", std::to_string(c2_result.found_domains.size())));
             } else {
-                basari("C2 domainleri engelli ✓");
+                basari(t("c2_blocked_success"));
             }
         }
 
@@ -326,7 +327,7 @@ int main(int argc, char* argv[]) {
         if (!args.skip_registry) {
             auto reg_res = Detector::registry_scan();
             if (!reg_res.found_keys.empty()) {
-                uyari("⚠ " + std::to_string(reg_res.found_keys.size()) + " zararlı registry kaydı bulundu!");
+                uyari(t("infected_registry", std::to_string(reg_res.found_keys.size())));
             }
         }
 
@@ -368,18 +369,18 @@ int main(int argc, char* argv[]) {
                 auto programs = Cleaner::find_affected_programs(infected);
                 if (!programs.empty()) {
                     std::cout << "\n";
-                    bilgi("Etkilenen programlar: " + std::to_string(programs.size()));
+                    bilgi(t("affected_programs") + std::to_string(programs.size()));
                     for (auto& prog : programs)
                         bilgi("  - " + prog);
 
                     std::string ans;
-                    std::cout << "  " << C::WHITE << "Winget ile yeniden kurulum yapılsın mı? (e/h): "
+                    std::cout << "  " << C::WHITE << t("reinstall_prompt")
                               << C::RESET;
                     std::getline(std::cin, ans);
                     if (ans == "e" || ans == "y" || ans == "evet" || ans == "yes") {
                         for (auto& prog : programs) {
                             std::string winget_id = Cleaner::find_winget_id(prog);
-                            bilgi("Yeniden kuruluyor: " + winget_id);
+                            bilgi(t("reinstalling") + winget_id);
                             Cleaner::reinstall_program(winget_id);
                         }
                     }
@@ -396,9 +397,9 @@ int main(int argc, char* argv[]) {
         print_scan_result(total_threats, counters.yara_hits, counters.scanned, elapsed_sec);
 
         if (total_threats > 0) {
-            toast_notify("Luckyware Cleaner", std::to_string(total_threats) + " tehdit tespit edildi!");
+            toast_notify("Luckyware Cleaner", t("threats_found", std::to_string(total_threats)));
         } else {
-            toast_notify("Luckyware Cleaner", "Sistem temiz - Tehdit bulunamadi!");
+            toast_notify("Luckyware Cleaner", t("system_clean_toast"));
         }
 
         if (total_threats > 0) {
@@ -458,7 +459,7 @@ int main(int argc, char* argv[]) {
             if (argc <= 1) {
                 std::string ans2;
                 std::cout << "\n  " << C::WHITE
-                          << "Tehdit bulunamadı. %TEMP% klasörlerini gene de temizlemek ister misiniz? (e/h): "
+                          << t("clean_temp_prompt")
                           << C::RESET;
                 std::getline(std::cin, ans2);
                 if (ans2 == "e" || ans2 == "y" || ans2 == "evet" || ans2 == "yes" || ans2 == "E" || ans2 == "Y") {
@@ -469,9 +470,9 @@ int main(int argc, char* argv[]) {
 
 
     } catch (const std::exception& e) {
-        std::cout << "\n  \033[31m[!] KRITIK C++ HATASI (CRASH ONLENDI):\033[0m " << e.what() << "\n";
+        std::cout << "\n  " << C::RED << t("critical_cpp_error") << e.what() << C::RESET << "\n";
     } catch (...) {
-        std::cout << "\n  \033[31m[!] BILINMEYEN BIR HATA OLUSTU!\033[0m\n";
+        std::cout << "\n  " << C::RED << t("unknown_error") << C::RESET << "\n";
     }
 
     std::cout << "\n";
