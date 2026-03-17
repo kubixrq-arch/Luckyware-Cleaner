@@ -25,7 +25,7 @@
 | ------------------ | ----------------------------- | --------------------------------------- |
 | 🌐 Language         | English & Turkish support     | İngilizce & Türkçe desteği              |
 | 🔍 YARA Scanner     | YARA-based malware detection  | YARA tabanlı zararlı tespit             |
-| 🧹 Auto Cleaner     | Registry, SDK, ImGui, Hosts   | Registry, SDK, ImGui, Hosts temizleme   |
+| 🧹 Auto Cleaner     | Reg, SDK, ImGui, Discord      | Reg, SDK, ImGui, Discord temizleme      |
 | 🛡️ PE Patch         | Disable malicious PE sections | Zararlı PE bölümlerini devre dışı bırak |
 | 🚫 C2 Block         | Permanently block C2 domains  | C2 domainlerini kalıcı olarak engelle   |
 | ⚡ Multi-thread     | 8-thread parallel scanning    | 8 iş parçacıklı paralel tarama          |
@@ -50,13 +50,19 @@
 
 Open `LuckywareCleaner.sln` in Visual Studio 2022 and build in **Release** mode. The YARA rules (`rules/luckyware.yar`) are automatically copied to the output directory.
 
+Alternatively, with CMake:
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
 ### 🚀 Usage Guide
 
 > [!IMPORTANT]
 > You **must** run the program **as Administrator**.
 
 ```bash
-LuckywareCleaner.exe C:\ --block --patch-pe --remove --rules rules\luckyware.yar
+LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 ```
 
 <details>
@@ -65,12 +71,16 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --rules rules\luckyware.yar
 | Flag               | Description                                     |
 | ------------------ | ----------------------------------------------- |
 | `--block`          | Permanently blocks C2 domains in HOSTS file     |
+| `--unblock`        | Removes Luckyware blocks from HOSTS file        |
 | `--patch-pe`       | Disables execution bit of malicious PE sections |
 | `--remove`         | Removes infected SUO/VCXPROJ/temp files         |
 | `--kill-process`   | Terminates malicious processes                  |
 | `--clean-registry` | Removes malicious Run/RunOnce entries           |
 | `--clean-sdk`      | Removes VccLibaries from windows.h              |
 | `--clean-imgui`    | Removes hex payloads from imgui_impl_win32.cpp  |
+| `--clean-discord`  | Cleans Discord injections                       |
+| `--full-clean`     | Runs all cleaning modules                       |
+| `--clear-cache`    | Clears the SHA256 cache                         |
 | `--rules <file>`   | Specifies the YARA rules file path              |
 | `--lang tr\|en`    | Language selection                              |
 | `--debug`          | Enable debug output                             |
@@ -87,8 +97,8 @@ LuckywareCleaner.exe C:\
 # Interactive mode (prompts for language & path)
 LuckywareCleaner.exe
 
-# Scan with all protections
-LuckywareCleaner.exe C:\ --block --patch-pe --remove --kill-process --clean-registry --clean-sdk --clean-imgui
+# Scan with all protections / Tüm korumalarla tam tarama
+LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 ```
 
 </details>
@@ -105,7 +115,7 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --kill-process --clean-regi
 cd "Luckyware Cleaner Tool\bin\Release"
 
 # 4. Run full scan with all protections
-LuckywareCleaner.exe C:\ --block --patch-pe --remove --rules rules\luckyware.yar
+LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 
 # 5. Follow the on-screen prompts
 # 6. Restart your computer ✓
@@ -142,7 +152,7 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --rules rules\luckyware.yar
 > Programı **YÖNETİCİ OLARAK** çalıştırmanız **zorunludur**.
 
 ```bash
-LuckywareCleaner.exe C:\ --block --patch-pe --remove --rules rules\luckyware.yar
+LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 ```
 
 <details>
@@ -151,12 +161,16 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --rules rules\luckyware.yar
 | Parametre          | Açıklama                                          |
 | ------------------ | ------------------------------------------------- |
 | `--block`          | C2 domainlerini HOSTS dosyasına kalıcı engeller   |
+| `--unblock`        | HOSTS'tan Luckyware engellerini kaldırır          |
 | `--patch-pe`       | Zararlı PE bölümlerinin çalıştırma bitini kapatır |
 | `--remove`         | Enfekte SUO/VCXPROJ/temp dosyalarını temizler     |
 | `--kill-process`   | Zararlı süreçleri sonlandırır                     |
 | `--clean-registry` | Zararlı Run/RunOnce kayıtlarını siler             |
 | `--clean-sdk`      | windows.h'dan VccLibaries'i kaldırır              |
 | `--clean-imgui`    | imgui_impl_win32.cpp'den hex payload'ı kaldırır   |
+| `--clean-discord`  | Discord enjeksiyonlarını temizler                 |
+| `--full-clean`     | Tüm temizleme modüllerini çalıştırır              |
+| `--clear-cache`    | SHA256 önbelleğini (cache) temizler               |
 | `--rules <dosya>`  | YARA kural dosyasının yolunu belirtir             |
 | `--lang tr\|en`    | Dil seçimi                                        |
 | `--debug`          | Hata ayıklama modu                                |
@@ -174,7 +188,7 @@ LuckywareCleaner.exe C:\
 LuckywareCleaner.exe
 
 # Tüm korumalarla tam tarama
-LuckywareCleaner.exe C:\ --block --patch-pe --remove --kill-process --clean-registry --clean-sdk --clean-imgui
+LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 ```
 
 </details>
@@ -191,7 +205,7 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --kill-process --clean-regi
 cd "Luckyware Cleaner Tool\bin\Release"
 
 # 4. Tüm korumalarla tam tarama başlatın
-LuckywareCleaner.exe C:\ --block --patch-pe --remove --rules rules\luckyware.yar
+LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 
 # 5. Ekran yönergelerini takip edin
 # 6. Bilgisayarı yeniden başlatın ✓

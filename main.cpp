@@ -1,4 +1,4 @@
-﻿#ifndef WIN32_LEAN_AND_MEAN
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
@@ -48,6 +48,8 @@ struct Args {
     bool clean_registry_flag = false;
     bool clean_sdk_flag      = false;
     bool clean_imgui_flag    = false;
+    bool clean_discord_flag  = false;
+    bool full_clean_flag     = false;
 };
 
 inline bool is_admin() {
@@ -78,6 +80,8 @@ inline Args parse_args(int argc, char* argv[]) {
         else if (a == "--clean-registry")                    args.clean_registry_flag = true;
         else if (a == "--clean-sdk")                         args.clean_sdk_flag = true;
         else if (a == "--clean-imgui")                       args.clean_imgui_flag = true;
+        else if (a == "--clean-discord")                     args.clean_discord_flag = true;
+        else if (a == "--full-clean")                        args.full_clean_flag = true;
         else if ((a == "--rules" || a == "--kurallar") && i + 1 < argc)
             args.rules_path = argv[++i];
         else if ((a == "--lang" || a == "--dil") && i + 1 < argc)
@@ -136,13 +140,23 @@ int main(int argc, char* argv[]) {
         // -------------------------------------------------------
         // CLEANER MODE: run standalone cleanup without a scan path
         // -------------------------------------------------------
+        if (args.full_clean_flag && args.scan_path.empty()) {
+            Cleaner::full_clean();
+            WSACleanup();
+            std::cout << "\n";
+            bilgi(t("press_enter"));
+            std::cin.get();
+            return 0;
+        }
+
         if (args.scan_path.empty() && (args.unblock || args.clean_registry_flag ||
-            args.clean_sdk_flag || args.clean_imgui_flag)) {
+            args.clean_sdk_flag || args.clean_imgui_flag || args.clean_discord_flag)) {
 
             if (args.unblock)               Cleaner::update_hosts();
             if (args.clean_registry_flag)   Cleaner::clean_registry();
             if (args.clean_sdk_flag)        Cleaner::clean_sdk();
             if (args.clean_imgui_flag)      Cleaner::clean_imgui();
+            if (args.clean_discord_flag)    Cleaner::clean_discord();
 
             WSACleanup();
             std::cout << "\n";
@@ -176,6 +190,8 @@ int main(int argc, char* argv[]) {
             } else {
                 hata(t("no_scan_path"));
                 std::cout << "  LuckywareCleaner.exe C:\\ --rules rules\\luckyware.yar [seçenekler]\n";
+                std::cout << "\nEn iyi temizleme komutu:\n";
+                std::cout << "  LuckywareCleaner.exe C:\\ --block --patch-pe --remove --full-clean\n";
                 std::cout << "\nSeçenekler:\n";
                 std::cout << "  --block           C2 domainlerini HOSTS'a engelle\n";
                 std::cout << "  --remove          Enfekte dosyaları otomatik temizle\n";
@@ -185,6 +201,8 @@ int main(int argc, char* argv[]) {
                 std::cout << "  --clean-registry  Registry'den zararlı Run kayıtlarını sil\n";
                 std::cout << "  --clean-sdk       windows.h'dan VccLibaries'i kaldır\n";
                 std::cout << "  --clean-imgui     imgui_impl_win32.cpp'den hex payload'ı kaldır\n";
+                std::cout << "  --clean-discord   Discord enjeksiyonlarını temizle\n";
+                std::cout << "  --full-clean      Tüm temizleme modüllerini çalıştır\n";
                 std::cout << "  --rules <dosya>   YARA kural dosyası (varsayılan: rules\\luckyware.yar)\n";
                 std::cout << "  --lang tr|en      Dil seçimi\n";
                 std::cout << "  --clear-cache     SHA256 cache'i temizle\n";
@@ -288,8 +306,8 @@ int main(int argc, char* argv[]) {
             if (pi.pid > 0) all_malicious_pids[pi.pid] = pi.name;
         }
 
-        section(t("sdk_title"));
-        basari(t("sdk_clean"));
+        // Actually run SDK cleanup to detect/fix infected headers
+        auto sdk_cleaned = Cleaner::clean_sdk();
 
         if (!rules.empty()) {
             auto c2_domains = YaraEngine::extract_domains(rules);
@@ -330,12 +348,21 @@ int main(int argc, char* argv[]) {
         // OPTIONAL: auto-clean flags passed on command line
         // -------------------------------------------------------
         if (args.auto_clean || args.unblock || args.clean_registry_flag ||
-            args.clean_sdk_flag || args.clean_imgui_flag) {
+            args.clean_sdk_flag || args.clean_imgui_flag || args.clean_discord_flag || args.full_clean_flag) {
 
-            if (args.clean_registry_flag)   Cleaner::clean_registry();
-            if (args.unblock)               Cleaner::update_hosts(c2_domains);
-            if (args.clean_sdk_flag)        Cleaner::clean_sdk();
-            if (args.clean_imgui_flag)      Cleaner::clean_imgui();
+            if (args.full_clean_flag) {
+                Cleaner::clean_registry();
+                Cleaner::update_hosts();
+                Cleaner::clean_sdk();
+                Cleaner::clean_imgui();
+                Cleaner::clean_discord();
+            } else {
+                if (args.clean_registry_flag)   Cleaner::clean_registry();
+                if (args.unblock)               Cleaner::update_hosts(c2_domains);
+                if (args.clean_sdk_flag)        Cleaner::clean_sdk();
+                if (args.clean_imgui_flag)      Cleaner::clean_imgui();
+                if (args.clean_discord_flag)    Cleaner::clean_discord();
+            }
 
             if (!infected.empty()) {
                 auto programs = Cleaner::find_affected_programs(infected);
@@ -401,6 +428,10 @@ int main(int argc, char* argv[]) {
                         } catch (...) {}
                     }
 
+                    Cleaner::kill_malware_processes();
+                    Cleaner::remove_dropped_files();
+                    Cleaner::clean_discord();
+                    Cleaner::clean_edge();
                     Cleaner::clean_registry();
 
                     if (!c2_domains.empty()) {

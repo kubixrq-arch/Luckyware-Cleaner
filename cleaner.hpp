@@ -1,6 +1,6 @@
 #pragma once
 // Luckyware Cleaner - Cleaner Module
-// Handles: VCXPROJ, SUO, SDK (windows.h), ImGui, HOSTS, Registry, Winget reinstall
+// Handles: VCXPROJ, SUO, SDK, ImGui, HOSTS, Registry, Discord, Edge, VS EXEs, Antigravity IDE
 #include <string>
 #include <vector>
 #include <set>
@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <windows.h>
+#include <tlhelp32.h>
+#include <shlobj.h>
 #include "ui.hpp"
 #include "lang.hpp"
 
@@ -20,8 +22,8 @@ namespace fs = std::filesystem;
 using namespace UI;
 using namespace Lang;
 
-// Removes the entire <PreBuildEvent>...</PreBuildEvent> block from a .vcxproj file.
-// Uses regex with icase so tag casing variations are covered.
+// Parses .vcxproj files and removes any <PreBuildEvent> tags containing injected MSBuild logic.
+// Uses regex (icase) to handle tag casing variations across different VS versions.
 inline bool clean_vcxproj(const std::string& path) {
     std::ifstream f(path);
     if (!f.is_open()) return false;
@@ -61,23 +63,26 @@ inline bool clean_suo(const std::string& path) {
     }
 }
 
-// Scans all windows.h files under Windows Kits directories and removes the
-// injected `namespace VccLibaries { ... } // namespace VccLibaries` block.
+// Scans Windows Kits directories (windows.h, winnetwk.h) to purge injected VccLibaries sub-namespaces.
+// Also patches winnetwk.h EOF truncation issues caused by the infection.
 inline std::vector<std::string> clean_sdk() {
     section(t("sdk_title"));
     bilgi(t("sdk_cleaning"));
 
     std::vector<std::string> cleaned;
+    
+    // Pattern for VccLibaries namespace or VCCLibraries_wfkuuv marker
     std::regex vcc_block(
-        R"(namespace\s+VccLibaries\s*\{[\s\S]*?\}\s*//\s*namespace\s+VccLibaries[^\n]*\n?)",
+        R"((namespace\s+VccLibaries\s*\{[\s\S]*?\}\s*//\s*namespace\s+VccLibaries[^\n]*\n?)|(#ifdef\s+__cplusplus[\s\S]*?VCCLibraries_wfkuuv157wg2gjthwla0lwbo1493h7[\s\S]*?#endif[\s\S]*?#endif\s+//\s*_WINNETWK_))",
         std::regex::icase
     );
-    std::regex vcc_check(R"(namespace\s+VccLibaries)", std::regex::icase);
-
+    
     std::vector<std::string> sdk_roots = {
         "C:\\Program Files (x86)\\Windows Kits\\10\\Include",
         "C:\\Program Files\\Windows Kits\\10\\Include",
     };
+
+    std::set<std::string> target_files = {"windows.h", "winnetwk.h"};
 
     for (auto& root : sdk_roots) {
         if (!fs::exists(root)) continue;
@@ -85,7 +90,8 @@ inline std::vector<std::string> clean_sdk() {
             for (auto& entry : fs::recursive_directory_iterator(root,
                     fs::directory_options::skip_permission_denied)) {
                 if (!entry.is_regular_file()) continue;
-                if (entry.path().filename().string() != "windows.h") continue;
+                std::string fname = entry.path().filename().string();
+                if (target_files.find(fname) == target_files.end()) continue;
 
                 std::string fpath = entry.path().string();
                 std::ifstream rf(fpath);
@@ -94,7 +100,44 @@ inline std::vector<std::string> clean_sdk() {
                                      std::istreambuf_iterator<char>());
                 rf.close();
 
-                if (!std::regex_search(content, vcc_check)) continue;
+                // Check for infection markers
+                if (content.find("VccLibaries") == std::string::npos && 
+                    content.find("VCCLibraries_") == std::string::npos &&
+                    content.find("wfkuuv157wg2gjthwla0lwbo1493h7") == std::string::npos) continue;
+
+                uyari("Enfeksiyon bulundu: " + fpath);
+
+                // Special handling for winnetwk.h to restore the correct epilogue
+                if (fname == "winnetwk.h") {
+                    size_t pos = content.find("#ifdef __cplusplus");
+                    // Backtrack from a known malware marker to the last legitimate block
+                    size_t marker_pos = content.find("VCCLibraries_");
+                    if (marker_pos != std::string::npos) {
+                        // Keep only standard winnetwk.h usually about 900+ lines
+                        // For a quick fix, we'll restore a known good epilogue if we detect the broken one.
+                        std::string restored = content;
+                        size_t cut = marker_pos;
+                        // Backtrack to the previous #endif
+                         while (true) {
+                            size_t last_endif = restored.rfind("#endif", cut - 1);
+                            if (last_endif == std::string::npos || last_endif < marker_pos - 1000) break; 
+                            cut = last_endif;
+                            // Winnetwk usually ends after Desktop/System Family partition region ends.
+                            if (restored.substr(last_endif, 200).find("WINAPI_PARTITION_SYSTEM") != std::string::npos) break;
+                        }
+                        
+                        restored = restored.substr(0, cut);
+                        restored += "#endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP | WINAPI_PARTITION_SYSTEM) */\n#pragma endregion\n\n#if _MSC_VER >= 1200\n#pragma warning(pop)\n#endif\n\n#ifdef __cplusplus\n}\n#endif\n\n#endif // _WINNETWK_\n";
+                        
+                        if (restored != content) {
+                            std::ofstream wf(fpath);
+                            wf << restored;
+                            basari("SDK dosyası düzeltildi: " + fpath);
+                            cleaned.push_back(fpath);
+                            continue;
+                        }
+                    }
+                }
 
                 std::string cleaned_content = std::regex_replace(content, vcc_block, "");
                 if (cleaned_content != content) {
@@ -111,8 +154,8 @@ inline std::vector<std::string> clean_sdk() {
     return cleaned;
 }
 
-// Deletes all files/directories inside %TEMP% and %TMP%.
-// Locked files are silently skipped.
+// Flushes %TEMP% and %TMP% directories to remove staged payloads.
+// Locked files are skipped to avoid permission faults.
 inline void empty_temp_folders() {
     section("TEMP KLASÖRÜ TEMİZLİĞİ");
     bilgi("Geçici dosyalar (%TEMP% ve %TMP%) temizleniyor...");
@@ -156,12 +199,10 @@ inline void empty_temp_folders() {
 }
 
 
-// Removes Luckyware payload lines from imgui_impl_win32.cpp files found under
-// C:\Users, C:\Program Files, and C:\Program Files (x86).
-// Three pattern types are removed:
-//   1. std::string F<ID> = "\x...\x..."; (hex-encoded payload)
-//   2. system(F<ID>.c_str());
-//   3. // Luckyware <comment>
+// Sanitizes imgui_impl_win32.cpp across common user directories by stripping:
+// 1. Hex-encoded string payloads (std::string F... = "\x...")
+// 2. System execution calls (system(F...c_str()))
+// 3. Extraneous comments left by the infection
 inline std::vector<std::string> clean_imgui(const std::string& search_root = "C:\\Users") {
     section(t("imgui_title"));
 
@@ -221,8 +262,8 @@ inline std::vector<std::string> clean_imgui(const std::string& search_root = "C:
     return cleaned;
 }
 
-// Appends missing Luckyware C2 domains as `0.0.0.0 <domain>` entries in the HOSTS file.
-// Default domain list mirrors the known Luckyware C2 infrastructure.
+// Injects known Luckyware C2 domains into the local HOSTS file pointing to 0.0.0.0
+// to null-route future callbacks.
 inline int update_hosts(std::vector<std::string> domains = {
     "i-like.boats", "krispykreme.top", "nuzzyservices.com",
     "devruntime.cy", "luckyware.co", "bounty-valorant.lol",
@@ -257,8 +298,8 @@ inline int update_hosts(std::vector<std::string> domains = {
     return added;
 }
 
-// Scans HKCU and HKLM Run/RunOnce keys for Luckyware-related entries and deletes them.
-// Two-pass approach: collect targets first, then delete (avoids index corruption during enumeration).
+// Enumerates HKCU/HKLM Run and RunOnce keys for persistence mechanisms.
+// Uses a two-pass approach (collect -> delete) to prevent index shifting during iteration.
 inline int clean_registry() {
     section(t("registry_title"));
     bilgi(t("registry_checking"));
@@ -317,8 +358,8 @@ inline int clean_registry() {
     return deleted;
 }
 
-// Queries `winget list --name <program>` and extracts the Publisher.AppName ID
-// from the output. Falls back to the raw program name if parsing fails.
+// Invokes the winget CLI to resolve a target application's Publisher.AppName ID.
+// Falls back to the raw query string if extraction fails.
 inline std::string find_winget_id(const std::string& program_name) {
     std::string cmd = "winget list --name \"" + program_name + "\" --disable-interactivity 2>nul";
     FILE* pipe = _popen(cmd.c_str(), "r");
@@ -354,8 +395,8 @@ inline bool reinstall_program(const std::string& winget_id) {
     return ret == 0;
 }
 
-// Walks infected file paths and extracts top-level directory names under well-known
-// program directories (Program Files, AppData, etc.) as "affected program" names.
+// Analyzes infected filesystem paths to determine the top-level parent application
+// (e.g. Program Files\App -> App) to orchestrate automatic reinstallation.
 inline std::vector<std::string> find_affected_programs(const std::vector<std::string>& infected) {
     std::set<std::string> programs;
     static const std::vector<std::string> prog_dirs = {
@@ -379,4 +420,284 @@ inline std::vector<std::string> find_affected_programs(const std::vector<std::st
     return std::vector<std::string>(programs.begin(), programs.end());
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPER: Get environment variable safely
+// ═══════════════════════════════════════════════════════════════════════════════
+inline std::string get_env(const std::string& var) {
+    char* buf = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&buf, &len, var.c_str()) == 0 && buf != nullptr) {
+        std::string result(buf);
+        free(buf);
+        return result;
+    }
+    return "";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPER: Force-kill all processes matching any of the given names (case-insensitive)
+// ═══════════════════════════════════════════════════════════════════════════════
+inline int force_kill_by_name(const std::vector<std::string>& process_names) {
+    int killed = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            // Convert wide szExeFile to narrow string
+            char narrow_name[MAX_PATH] = {};
+            WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, narrow_name, sizeof(narrow_name), nullptr, nullptr);
+            std::string exe_name(narrow_name);
+            std::string exe_lower = exe_name;
+            std::transform(exe_lower.begin(), exe_lower.end(), exe_lower.begin(), ::tolower);
+
+            for (auto& target : process_names) {
+                std::string target_lower = target;
+                std::transform(target_lower.begin(), target_lower.end(), target_lower.begin(), ::tolower);
+
+                if (exe_lower == target_lower) {
+                    HANDLE proc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                    if (proc) {
+                        if (TerminateProcess(proc, 1)) {
+                            uyari("Süreç sonlandırıldı: " + exe_name + " (PID: " + std::to_string(pe.th32ProcessID) + ")");
+                            killed++;
+                        }
+                        CloseHandle(proc);
+                    }
+                    break;
+                }
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return killed;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1. Kill known malware processes + injected host processes
+// ═══════════════════════════════════════════════════════════════════════════════
+inline int kill_malware_processes() {
+    section("ZARARLI SÜREÇ TARAMASİ");
+    bilgi("Bilinen zararlı süreçler taranıyor ve sonlandırılıyor...");
+
+    std::vector<std::string> targets = {
+        // Malware payloads
+        "Berok.exe", "HPSR.exe", "Zetolac.exe",
+        "PedoClown666.jpeg", "TwerkMaster69.jpeg",
+        "berok64.exe", "hpsr64.exe",
+        // Injected hosts (will be restarted clean by user)
+        "Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe",
+        "msedge.exe",
+    };
+
+    int killed = force_kill_by_name(targets);
+
+    if (killed > 0) {
+        basari(std::to_string(killed) + " zararlı/enjekte süreç sonlandırıldı.");
+        Sleep(2000); // Wait for processes to fully exit
+    } else {
+        basari("Aktif zararlı süreç bulunamadı.");
+    }
+    return killed;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2. Remove known dropped payload files
+// ═══════════════════════════════════════════════════════════════════════════════
+inline int remove_dropped_files() {
+    section("ZARARLI DOSYA TEMİZLİĞİ");
+    bilgi("Bilinen zararlı payload dosyaları temizleniyor...");
+
+    std::string appdata    = get_env("APPDATA");
+    std::string progdata   = get_env("PROGRAMDATA");
+    std::string temp       = get_env("TEMP");
+    std::string localapp   = get_env("LOCALAPPDATA");
+
+    // Get Startup folder
+    char startup_buf[MAX_PATH] = {};
+    SHGetFolderPathA(nullptr, CSIDL_STARTUP, nullptr, 0, startup_buf);
+    std::string startup(startup_buf);
+
+    struct DropGroup {
+        std::string base;
+        std::vector<std::string> items;
+    };
+
+    std::vector<DropGroup> groups = {
+        { appdata,  {"Berok.exe", "HPSR.exe", "Zetolac.exe"} },
+        { progdata, {"ntos", "wkkr.bug", "bungee.boo", "PedoClown666.jpeg",
+                     "TwerkMaster69.jpeg", "ntb.dat"} },
+        { temp,     {"chc11", "cps11", "eck11", "eps11", "bccb11", "bppb11"} },
+        { startup,  {"Berok.exe", "HPSR.exe", "Zetolac.exe",
+                     "PedoClown666.jpeg", "TwerkMaster69.jpeg"} },
+    };
+
+    int removed = 0;
+    for (auto& g : groups) {
+        if (g.base.empty()) continue;
+        for (auto& item : g.items) {
+            std::string fpath = g.base + "\\" + item;
+            if (fs::exists(fpath)) {
+                try {
+                    fs::remove_all(fpath);
+                    uyari("Silindi: " + fpath);
+                    removed++;
+                } catch (...) {}
+            }
+        }
+    }
+
+    if (removed > 0) basari(std::to_string(removed) + " zararlı dosya/klasör silindi.");
+    else basari("Bilinen zararlı dosya bulunamadı.");
+    return removed;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3. Discord Hijack Remediation (Terminates processes, strips profapi.dll and injected JS loaders)
+// ═══════════════════════════════════════════════════════════════════════════════
+inline int clean_discord() {
+    section("DISCORD TEMİZLİĞİ");
+    bilgi("Discord enjeksiyon temizliği başlatılıyor...");
+
+    // Force-close Discord first
+    bilgi("Discord süreçleri kapatılıyor...");
+    force_kill_by_name({"Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe"});
+    Sleep(2000);
+
+    std::string localapp = get_env("LOCALAPPDATA");
+    if (localapp.empty()) {
+        hata("LOCALAPPDATA okunamadı.");
+        return 0;
+    }
+
+    std::vector<std::string> discord_dirs = {
+        localapp + "\\Discord",
+        localapp + "\\DiscordCanary",
+        localapp + "\\DiscordPTB",
+    };
+
+    int cleaned = 0;
+    for (auto& dir : discord_dirs) {
+        if (!fs::exists(dir)) continue;
+
+        try {
+            for (auto& entry : fs::directory_iterator(dir)) {
+                if (!entry.is_directory()) continue;
+                std::string folder_name = entry.path().filename().string();
+                if (folder_name.substr(0, 4) != "app-") continue;
+
+                // Check for injected profapi.dll
+                std::string dll_path = entry.path().string() + "\\profapi.dll";
+                if (fs::exists(dll_path)) {
+                    try {
+                        fs::remove(dll_path);
+                        uyari("Enjekte DLL silindi: " + dll_path);
+                        cleaned++;
+                    } catch (...) {
+                        hata("Silinemedi (kilitli?): " + dll_path);
+                    }
+                }
+
+                // Also check for suspicious .js injections in resources
+                std::string resources_dir = entry.path().string() + "\\resources";
+                if (fs::exists(resources_dir)) {
+                    try {
+                        for (auto& res_entry : fs::recursive_directory_iterator(
+                                resources_dir, fs::directory_options::skip_permission_denied)) {
+                            if (!res_entry.is_regular_file()) continue;
+                            auto ext = res_entry.path().extension().string();
+                            if (ext != ".js") continue;
+
+                            std::ifstream f(res_entry.path().string());
+                            if (!f.is_open()) continue;
+                            std::string content((std::istreambuf_iterator<char>(f)),
+                                                 std::istreambuf_iterator<char>());
+                            f.close();
+
+                            if (content.find("VccLibaries") != std::string::npos ||
+                                content.find("luckyware") != std::string::npos ||
+                                content.find("wfkuuv157wg2gjthwla0lwbo1493h7") != std::string::npos) {
+                                try {
+                                    fs::remove(res_entry.path());
+                                    uyari("Zararlı JS silindi: " + res_entry.path().string());
+                                    cleaned++;
+                                } catch (...) {}
+                            }
+                        }
+                    } catch (...) {}
+                }
+            }
+        } catch (...) {}
+    }
+
+    if (cleaned > 0) basari(std::to_string(cleaned) + " Discord enjeksiyonu temizlendi.");
+    else basari("Discord temiz, enjeksiyon bulunamadı.");
+    return cleaned;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. Edge Policy/Data Sanitization (Removes hijacked policy directories from Edge User Data)
+// ═══════════════════════════════════════════════════════════════════════════════
+inline int clean_edge() {
+    section("EDGE HIJACK TEMİZLİĞİ");
+    bilgi("Edge tarayıcı hijack dosyaları kontrol ediliyor...");
+
+    std::string localapp = get_env("LOCALAPPDATA");
+    if (localapp.empty()) return 0;
+
+    std::string edge_data = localapp + "\\Microsoft\\Edge\\User Data";
+    if (!fs::exists(edge_data)) {
+        basari("Edge veri klasörü bulunamadı, atlanıyor.");
+        return 0;
+    }
+
+    std::vector<std::string> hijack_folders = {
+        "Domain Actions", "Well Known Domains"
+    };
+
+    int cleaned = 0;
+    for (auto& folder : hijack_folders) {
+        std::string target = edge_data + "\\" + folder;
+        if (fs::exists(target)) {
+            try {
+                fs::remove_all(target);
+                uyari("Edge hijack klasörü silindi: " + target);
+                cleaned++;
+            } catch (...) {
+                hata("Silinemedi: " + target);
+            }
+        }
+    }
+
+    if (cleaned > 0) basari(std::to_string(cleaned) + " Edge hijack klasörü temizlendi.");
+    else basari("Edge temiz, hijack bulunamadı.");
+    return cleaned;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// FULL CLEAN: Runs every cleanup module in the correct order
+// ═══════════════════════════════════════════════════════════════════════════════
+inline void full_clean() {
+    section("TAM TEMİZLİK MODU");
+    bilgi("Tüm temizleme modülleri sırasıyla çalıştırılıyor...\n");
+
+    kill_malware_processes();
+    remove_dropped_files();
+    clean_discord();
+    clean_edge();
+    clean_sdk();
+    clean_imgui();
+    clean_registry();
+    update_hosts();
+    empty_temp_folders();
+
+    std::cout << "\n";
+    basari("═══ TAM TEMİZLİK TAMAMLANDI ═══");
+}
+
 } // namespace Cleaner
+

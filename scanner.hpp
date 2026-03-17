@@ -303,8 +303,8 @@ inline ScanResult scan_directory(const std::string& root_path,
 
             result.counters.scanned.fetch_add(1, std::memory_order_relaxed);
 
-            // Additionally check .vcxproj files for <PreBuildEvent> blocks in case
-            // the YARA rule doesn't catch a variant.
+            // Additionally check .vcxproj files for malicious <PreBuildEvent> blocks.
+            // Only flag if the block contains known malicious indicators.
             bool is_malicious_vcxproj = false;
             if (ext == ".vcxproj") {
                 std::ifstream f(filepath);
@@ -312,9 +312,36 @@ inline ScanResult scan_directory(const std::string& root_path,
                     std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
                     f.close();
 
-                    std::regex prebuild_block(R"(\s*<PreBuildEvent>[\s\S]*?<\/PreBuildEvent>\s*)", std::regex::icase);
-                    if (std::regex_search(content, prebuild_block)) {
-                        is_malicious_vcxproj = true;
+                    // Extract PreBuildEvent blocks and check content for malware indicators
+                    std::regex prebuild_block(R"(<PreBuildEvent>[\s\S]*?<\/PreBuildEvent>)", std::regex::icase);
+                    auto it = std::sregex_iterator(content.begin(), content.end(), prebuild_block);
+                    while (it != std::sregex_iterator()) {
+                        std::string block = (*it)[0].str();
+                        std::string block_lower = block;
+                        std::transform(block_lower.begin(), block_lower.end(), block_lower.begin(), ::tolower);
+
+                        // Check for suspicious patterns within the PreBuildEvent
+                        bool has_ps_hidden = (block_lower.find("powershell") != std::string::npos) &&
+                                             ((block_lower.find("-windowstyle hidden") != std::string::npos) ||
+                                              (block_lower.find("-executionpolicy bypass") != std::string::npos));
+                        bool has_downloader = (block_lower.find("invoke-webrequest") != std::string::npos) ||
+                                              (block_lower.find("iwr -uri") != std::string::npos) ||
+                                              (block_lower.find("start-process") != std::string::npos &&
+                                               block_lower.find("$env:appdata") != std::string::npos);
+                        bool has_vbs = (block_lower.find("wscript.shell") != std::string::npos) ||
+                                       (block_lower.find("adodb.recordset") != std::string::npos) ||
+                                       (block_lower.find("bin.base64") != std::string::npos);
+                        bool has_known = (block_lower.find("berok.exe") != std::string::npos) ||
+                                         (block_lower.find("hpsr.exe") != std::string::npos) ||
+                                         (block_lower.find("zetolac.exe") != std::string::npos) ||
+                                         (block_lower.find("retev.php") != std::string::npos) ||
+                                         (block_lower.find("wfkuuv157wg2gjthwla0lwbo1493h7") != std::string::npos);
+
+                        if ((has_ps_hidden && has_downloader) || has_vbs || has_known) {
+                            is_malicious_vcxproj = true;
+                            break;
+                        }
+                        ++it;
                     }
                 }
             }
