@@ -265,9 +265,14 @@ inline std::vector<std::string> clean_imgui(const std::string& search_root = "C:
 // Injects known Luckyware C2 domains into the local HOSTS file pointing to 0.0.0.0
 // to null-route future callbacks.
 inline int update_hosts(std::vector<std::string> domains = {
-    "i-like.boats", "krispykreme.top", "nuzzyservices.com",
-    "devruntime.cy", "luckyware.co", "bounty-valorant.lol",
-    "vcc-redistrbutable.help"
+    "pubshierstext.top", "frozi.cc", "concodro.lat", "krispykreme.top",
+    "wallmart.mom", "stratum.ravenminer.com", "matchashop.icu",
+    "vcc-library.online", "vcc-library.help", "i-slept-with-ur.mom",
+    "i-like.boats", "devruntime.cy", "zetolacs-cloud.top", "exo-api.tf",
+    "nuzzyservices.com", "darkside.cy", "balista.lol", "phobos.top",
+    "phobosransom.com", "pee-files.nl", "vcc-library.uk", "luckyware.co",
+    "luckyware.cc", "91.92.243.218", "dhszo.darkside.cy", "188.114.96.11",
+    "risesmp.net", "luckystrike.pw", "vcc-redistrbutable.help"
 }) {
     if (domains.empty()) return 0;
     section(t("hosts_title"));
