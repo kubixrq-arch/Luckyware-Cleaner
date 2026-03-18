@@ -21,6 +21,7 @@
 #include "lang.hpp"
 #include "yara_engine.hpp"
 #include "pe_check.hpp"
+#include "obfuscate.hpp"
 
 #pragma comment(lib, "crypt32.lib")
 
@@ -236,6 +237,7 @@ inline ScanResult scan_directory(const std::string& root_path,
     }
 
     int total_files = (int)file_list.size();
+
     bilgi(t("scan_total_files", std::to_string(total_files)));
 
     section(t("scan_in_progress"));
@@ -321,21 +323,21 @@ inline ScanResult scan_directory(const std::string& root_path,
                         std::transform(block_lower.begin(), block_lower.end(), block_lower.begin(), ::tolower);
 
                         // Check for suspicious patterns within the PreBuildEvent
-                        bool has_ps_hidden = (block_lower.find("powershell") != std::string::npos) &&
-                                             ((block_lower.find("-windowstyle hidden") != std::string::npos) ||
-                                              (block_lower.find("-executionpolicy bypass") != std::string::npos));
-                        bool has_downloader = (block_lower.find("invoke-webrequest") != std::string::npos) ||
-                                              (block_lower.find("iwr -uri") != std::string::npos) ||
-                                              (block_lower.find("start-process") != std::string::npos &&
-                                               block_lower.find("$env:appdata") != std::string::npos);
-                        bool has_vbs = (block_lower.find("wscript.shell") != std::string::npos) ||
-                                       (block_lower.find("adodb.recordset") != std::string::npos) ||
-                                       (block_lower.find("bin.base64") != std::string::npos);
-                        bool has_known = (block_lower.find("berok.exe") != std::string::npos) ||
-                                         (block_lower.find("hpsr.exe") != std::string::npos) ||
-                                         (block_lower.find("zetolac.exe") != std::string::npos) ||
-                                         (block_lower.find("retev.php") != std::string::npos) ||
-                                         (block_lower.find("wfkuuv157wg2gjthwla0lwbo1493h7") != std::string::npos);
+                        bool has_ps_hidden = (block_lower.find(Obf::scan_powershell()) != std::string::npos) &&
+                                             ((block_lower.find(Obf::scan_winstyle_hid()) != std::string::npos) ||
+                                              (block_lower.find(Obf::scan_execpol_byp()) != std::string::npos));
+                        bool has_downloader = (block_lower.find(Obf::scan_invoke_wr()) != std::string::npos) ||
+                                              (block_lower.find(Obf::scan_iwr_uri()) != std::string::npos) ||
+                                              (block_lower.find(Obf::scan_start_proc()) != std::string::npos &&
+                                               block_lower.find(Obf::scan_env_appdata()) != std::string::npos);
+                        bool has_vbs = (block_lower.find(Obf::scan_wscript()) != std::string::npos) ||
+                                       (block_lower.find(Obf::scan_adodb()) != std::string::npos) ||
+                                       (block_lower.find(Obf::scan_base64()) != std::string::npos);
+                        bool has_known = (block_lower.find(Obf::scan_berok()) != std::string::npos) ||
+                                         (block_lower.find(Obf::scan_hpsr()) != std::string::npos) ||
+                                         (block_lower.find(Obf::scan_zetolac()) != std::string::npos) ||
+                                         (block_lower.find(Obf::scan_retev()) != std::string::npos) ||
+                                         (block_lower.find(Obf::scan_wfkuuv()) != std::string::npos);
 
                         if ((has_ps_hidden && has_downloader) || has_vbs || has_known) {
                             is_malicious_vcxproj = true;

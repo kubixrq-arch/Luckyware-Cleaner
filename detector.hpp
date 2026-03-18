@@ -26,6 +26,7 @@
 #include <fstream>
 #include "ui.hpp"
 #include "lang.hpp"
+#include "obfuscate.hpp"
 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -125,12 +126,12 @@ inline MutexScanResult mutex_scan() {
     std::regex ox_re("^ox_\\d+\\.exe$");
     std::regex bk_re("^bk\\d{6}\\.exe$");
     std::regex hpsr_re("^hpsr\\d{6}\\.exe$");
-    static const std::set<std::string> known_malicious = {
-        "berok.exe", "zetolac.exe", "hpsr.exe"
-    };
+    std::vector<std::string> known_malicious = Obf::known_malicious_names();
+    // Convert to set for fast lookup
+    std::set<std::string> known_malicious_set(known_malicious.begin(), known_malicious.end());
 
     for (auto& [pid, name] : procs) {
-        if (known_malicious.count(name)) {
+        if (known_malicious_set.count(name)) {
             tehdit(t("malicious_process", name));
             bilgi(t("dropper_running"));
             result.found_mutexes.push_back("process:" + name);
@@ -283,10 +284,14 @@ inline HollowResult hollow_scan() {
                 DWORD pid = pe.th32ProcessID;
                 std::vector<std::string> anomalies;
 
-                if (pe.cntThreads <= 1) {
+                // Single-thread heuristic: safe for most processes but skip for
+                // svchost.exe — legitimate svchost instances can start with 1 thread
+                // and killing the wrong one causes BSOD / critical-service crash.
+                if (pe.cntThreads <= 1 && target.name != "svchost.exe") {
                     anomalies.push_back(t("single_thread_proc"));
                 }
 
+                bool has_path_mismatch = false;
                 HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
                 if (hProc) {
                     char path_buf[MAX_PATH] = {};
@@ -296,14 +301,27 @@ inline HollowResult hollow_scan() {
                                        actual_path.begin(), ::tolower);
                         if (!actual_path.empty() && actual_path != target.expected_path) {
                             anomalies.push_back(t("fake_path", actual_path));
+                            has_path_mismatch = true;
                         }
                     } else {
-                        anomalies.push_back(t("path_unreadable"));
+                        // Path unreadable: flag for non-svchost processes only.
+                        // For svchost.exe, unreadable path alone is NOT enough evidence —
+                        // we must avoid false positives that could BSOD the system.
+                        if (target.name != "svchost.exe") {
+                            anomalies.push_back(t("path_unreadable"));
+                        }
                     }
                     CloseHandle(hProc);
                 }
 
-                if (!anomalies.empty()) {
+                // For svchost.exe we require confirmed path mismatch before
+                // marking the process as suspicious (to prevent BSOD on kill).
+                bool should_flag = !anomalies.empty();
+                if (target.name == "svchost.exe" && !has_path_mismatch) {
+                    should_flag = false;
+                }
+
+                if (should_flag) {
                     tehdit(t("hollow_proc", target.name, std::to_string(pid)));
                     for (auto& a : anomalies)
                         bilgi("  \u2514\u2500 " + C::YELLOW + a + C::RESET);
@@ -405,15 +423,7 @@ inline RegistryResult registry_scan() {
     section(t("registry_title"));
     bilgi(t("registry_checking"));
 
-    std::regex zararli_re(
-        "(i-like\\.boats|krispykreme\\.top|nuzzyservices|devruntime\\.cy"
-        "|luckyware\\.co|bounty-valorant\\.lol|vcc-redistrbutable"
-        "|powershell.*windowstyle.*hidden"
-        "|iwr\\s+-uri.*berok"
-        "|berok\\.exe|zetolac\\.exe"
-        "|VccFramework|PFLwrx|CDat\\.bin)",
-        std::regex::icase
-    );
+    std::regex zararli_re(Obf::registry_regex_pattern(), std::regex::icase);
 
     struct HiveInfo {
         HKEY hive;
@@ -459,12 +469,40 @@ inline RegistryResult registry_scan() {
     return result;
 }
 
+inline bool enable_debug_privilege_det() {
+    HANDLE hToken;
+    if (!OpenProcessToken(GetCurrentProcess(),
+                          TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
+        return false;
+
+    LUID luid;
+    if (!LookupPrivilegeValueA(nullptr, "SeDebugPrivilege", &luid)) {
+        CloseHandle(hToken);
+        return false;
+    }
+
+    TOKEN_PRIVILEGES tp{};
+    tp.PrivilegeCount           = 1;
+    tp.Privileges[0].Luid       = luid;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+    bool ok = AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp),
+                                    nullptr, nullptr) &&
+              GetLastError() == ERROR_SUCCESS;
+    CloseHandle(hToken);
+    return ok;
+}
+
 inline int kill_processes(const std::map<DWORD, std::string>& pids) {
     section(t("kill_title"));
     if (pids.empty()) {
         bilgi(t("kill_none"));
         return 0;
     }
+    // Enable SeDebugPrivilege so we can terminate SYSTEM / PPL-light processes
+    // such as svchost.exe that have been injected by the malware loader.
+    enable_debug_privilege_det();
+
     int killed = 0;
     for (auto& [pid, name] : pids) {
         HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);

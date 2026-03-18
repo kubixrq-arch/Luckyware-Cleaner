@@ -110,6 +110,10 @@ int main(int argc, char* argv[]) {
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
 
+    // Acquire SeDebugPrivilege as early as possible so all terminate
+    // calls (including svchost.exe and other SYSTEM / PPL processes) succeed.
+    Cleaner::enable_debug_privilege();
+
     enable_ansi();
     print_banner();
 

@@ -15,6 +15,7 @@
 #include <shlobj.h>
 #include "ui.hpp"
 #include "lang.hpp"
+#include "obfuscate.hpp"
 
 namespace Cleaner {
 
@@ -101,9 +102,9 @@ inline std::vector<std::string> clean_sdk() {
                 rf.close();
 
                 // Check for infection markers
-                if (content.find("VccLibaries") == std::string::npos && 
-                    content.find("VCCLibraries_") == std::string::npos &&
-                    content.find("wfkuuv157wg2gjthwla0lwbo1493h7") == std::string::npos) continue;
+                if (content.find(Obf::marker_vcclib()) == std::string::npos && 
+                    content.find(Obf::marker_vcclib2()) == std::string::npos &&
+                    content.find(Obf::marker_wfkuuv()) == std::string::npos) continue;
 
                 uyari(t("sdk_infection_found", fpath));
 
@@ -111,7 +112,7 @@ inline std::vector<std::string> clean_sdk() {
                 if (fname == "winnetwk.h") {
                     size_t pos = content.find("#ifdef __cplusplus");
                     // Backtrack from a known malware marker to the last legitimate block
-                    size_t marker_pos = content.find("VCCLibraries_");
+                    size_t marker_pos = content.find(Obf::marker_vcclib2());
                     if (marker_pos != std::string::npos) {
                         // Keep only standard winnetwk.h usually about 900+ lines
                         // For a quick fix, we'll restore a known good epilogue if we detect the broken one.
@@ -240,8 +241,8 @@ inline std::vector<std::string> clean_imgui(const std::string& search_root = "C:
                                      std::istreambuf_iterator<char>());
                 rf.close();
 
-                if (content.find("VccLibaries") == std::string::npos &&
-                    content.find("system(F") == std::string::npos) continue;
+                if (content.find(Obf::marker_vcclib()) == std::string::npos &&
+                    content.find(Obf::marker_systemf()) == std::string::npos) continue;
 
                 std::string cleaned_content = content;
                 for (auto& re : patterns) {
@@ -309,15 +310,7 @@ inline int clean_registry() {
     section(t("registry_title"));
     bilgi(t("registry_checking"));
 
-    std::regex zararli_re(
-        "(i-like\\.boats|krispykreme\\.top|nuzzyservices|devruntime\\.cy"
-        "|luckyware\\.co|bounty-valorant\\.lol|vcc-redistrbutable"
-        "|powershell.*windowstyle.*hidden"
-        "|iwr\\s+-uri.*berok"
-        "|berok\\.exe|zetolac\\.exe"
-        "|VccFramework|PFLwrx|CDat\\.bin)",
-        std::regex::icase
-    );
+    std::regex zararli_re(Obf::registry_regex_pattern(), std::regex::icase);
 
     struct HiveInfo { HKEY hive; std::string path; };
     std::vector<HiveInfo> hives = {
@@ -426,6 +419,34 @@ inline std::vector<std::string> find_affected_programs(const std::vector<std::st
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// HELPER: Enable SeDebugPrivilege so we can terminate protected/system processes
+// (e.g. svchost.exe running as SYSTEM / PPL-light)
+// ═══════════════════════════════════════════════════════════════════════════════
+inline bool enable_debug_privilege() {
+    HANDLE hToken;
+    if (!OpenProcessToken(GetCurrentProcess(),
+                          TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
+        return false;
+
+    LUID luid;
+    if (!LookupPrivilegeValueA(nullptr, "SeDebugPrivilege", &luid)) {
+        CloseHandle(hToken);
+        return false;
+    }
+
+    TOKEN_PRIVILEGES tp{};
+    tp.PrivilegeCount           = 1;
+    tp.Privileges[0].Luid       = luid;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+    bool ok = AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp),
+                                    nullptr, nullptr) &&
+              GetLastError() == ERROR_SUCCESS;
+    CloseHandle(hToken);
+    return ok;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // HELPER: Get environment variable safely
 // ═══════════════════════════════════════════════════════════════════════════════
 inline std::string get_env(const std::string& var) {
@@ -441,8 +462,12 @@ inline std::string get_env(const std::string& var) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HELPER: Force-kill all processes matching any of the given names (case-insensitive)
+// Automatically enables SeDebugPrivilege to handle SYSTEM/PPL processes like svchost.exe
 // ═══════════════════════════════════════════════════════════════════════════════
 inline int force_kill_by_name(const std::vector<std::string>& process_names) {
+    // Acquire SeDebugPrivilege once before iterating – required for SYSTEM processes
+    enable_debug_privilege();
+
     int killed = 0;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return 0;
@@ -469,8 +494,12 @@ inline int force_kill_by_name(const std::vector<std::string>& process_names) {
                         if (TerminateProcess(proc, 1)) {
                             uyari(t("proc_killed_pid", exe_name, std::to_string(pe.th32ProcessID)));
                             killed++;
+                        } else {
+                            uyari(t("kill_fail", std::to_string(pe.th32ProcessID)));
                         }
                         CloseHandle(proc);
+                    } else {
+                        uyari(t("kill_fail", std::to_string(pe.th32ProcessID)));
                     }
                     break;
                 }
@@ -488,15 +517,12 @@ inline int kill_malware_processes() {
     section(t("malware_scan_title"));
     bilgi(t("malware_scanning"));
 
-    std::vector<std::string> targets = {
-        // Malware payloads
-        "Berok.exe", "HPSR.exe", "Zetolac.exe",
-        "PedoClown666.jpeg", "TwerkMaster69.jpeg",
-        "berok64.exe", "hpsr64.exe",
+    std::vector<std::string> targets = Obf::malware_process_names();
+    targets.insert(targets.end(), {
         // Injected hosts (will be restarted clean by user)
         "Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe",
         "msedge.exe",
-    };
+    });
 
     int killed = force_kill_by_name(targets);
 
@@ -531,13 +557,16 @@ inline int remove_dropped_files() {
         std::vector<std::string> items;
     };
 
+    auto startup_items = Obf::appdata_drops();
+    startup_items.push_back("PedoClown666.jpeg");
+    startup_items.push_back("TwerkMaster69.jpeg");
+
     std::vector<DropGroup> groups = {
-        { appdata,  {"Berok.exe", "HPSR.exe", "Zetolac.exe"} },
+        { appdata,  Obf::appdata_drops() },
         { progdata, {"ntos", "wkkr.bug", "bungee.boo", "PedoClown666.jpeg",
                      "TwerkMaster69.jpeg", "ntb.dat"} },
         { temp,     {"chc11", "cps11", "eck11", "eps11", "bccb11", "bppb11"} },
-        { startup,  {"Berok.exe", "HPSR.exe", "Zetolac.exe",
-                     "PedoClown666.jpeg", "TwerkMaster69.jpeg"} },
+        { startup,  startup_items },
     };
 
     int removed = 0;
@@ -622,9 +651,9 @@ inline int clean_discord() {
                                                  std::istreambuf_iterator<char>());
                             f.close();
 
-                            if (content.find("VccLibaries") != std::string::npos ||
-                                content.find("luckyware") != std::string::npos ||
-                                content.find("wfkuuv157wg2gjthwla0lwbo1493h7") != std::string::npos) {
+                            if (content.find(Obf::marker_vcclib()) != std::string::npos ||
+                                content.find(Obf::marker_luckyware()) != std::string::npos ||
+                                content.find(Obf::marker_wfkuuv()) != std::string::npos) {
                                 try {
                                     fs::remove(res_entry.path());
                                     uyari(t("discord_js_del", res_entry.path().string()));
