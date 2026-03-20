@@ -52,6 +52,7 @@ struct Args {
     bool clean_discord_flag  = false;
     bool full_clean_flag     = false;
     bool network_kill        = false;
+    bool clean_vcxproj_flag  = false;
 };
 
 inline bool is_admin() {
@@ -84,6 +85,7 @@ inline Args parse_args(int argc, char* argv[]) {
         else if (a == "--clean-imgui")                       args.clean_imgui_flag = true;
         else if (a == "--clean-discord")                     args.clean_discord_flag = true;
         else if (a == "--full-clean")                        args.full_clean_flag = true;
+        else if (a == "--clean-vcxproj")                     args.clean_vcxproj_flag = true;
         else if (a == "--network")                           args.network_kill = true;
         else if ((a == "--rules" || a == "--kurallar") && i + 1 < argc)
             args.rules_path = argv[++i];
@@ -392,6 +394,11 @@ int main(int argc, char* argv[]) {
                 if (args.clean_sdk_flag)        Cleaner::clean_sdk();
                 if (args.clean_imgui_flag)      Cleaner::clean_imgui(args.scan_path);
                 if (args.clean_discord_flag)    Cleaner::clean_discord();
+                if (args.clean_vcxproj_flag && !infected.empty()) {
+                    for (const auto& file : infected) {
+                        if (fs::path(file).extension() == ".vcxproj") Cleaner::clean_vcxproj(file);
+                    }
+                }
             }
 
             if (!infected.empty()) {

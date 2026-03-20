@@ -72,6 +72,7 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 | `--clean-sdk`      | Removes VccLibaries from windows.h              |
 | `--clean-imgui`    | Removes hex payloads from imgui_impl_win32.cpp  |
 | `--clean-discord`  | Cleans Discord injections                       |
+| `--clean-vcxproj`  | Cleans only .vcxproj file injections            |
 | `--full-clean`     | Runs all cleaning modules                       |
 | `--clear-cache`    | Clears the SHA256 cache                         |
 | `--rules <file>`   | Specifies the YARA rules file path              |
@@ -163,6 +164,7 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 | `--clean-sdk`      | windows.h'dan VccLibaries'i kaldırır              |
 | `--clean-imgui`    | imgui_impl_win32.cpp'den hex payload'ı kaldırır   |
 | `--clean-discord`  | Discord enjeksiyonlarını temizler                 |
+| `--clean-vcxproj`  | Sadece .vcxproj dosyalarındaki enjeksiyonu siler  |
 | `--full-clean`     | Tüm temizleme modüllerini çalıştırır              |
 | `--clear-cache`    | SHA256 önbelleğini (cache) temizler               |
 | `--network`        | Tarama sırasında interneti keser (Kill-Switch)    |
