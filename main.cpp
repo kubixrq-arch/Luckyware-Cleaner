@@ -51,6 +51,7 @@ struct Args {
     bool clean_imgui_flag    = false;
     bool clean_discord_flag  = false;
     bool full_clean_flag     = false;
+    bool network_kill        = false;
 };
 
 inline bool is_admin() {
@@ -83,6 +84,7 @@ inline Args parse_args(int argc, char* argv[]) {
         else if (a == "--clean-imgui")                       args.clean_imgui_flag = true;
         else if (a == "--clean-discord")                     args.clean_discord_flag = true;
         else if (a == "--full-clean")                        args.full_clean_flag = true;
+        else if (a == "--network")                           args.network_kill = true;
         else if ((a == "--rules" || a == "--kurallar") && i + 1 < argc)
             args.rules_path = argv[++i];
         else if ((a == "--lang" || a == "--dil") && i + 1 < argc)
@@ -268,7 +270,7 @@ int main(int argc, char* argv[]) {
         scan_opts.debug        = args.debug;
         scan_opts.num_threads  = 8;
 
-        bool disconnect_net = false;
+        bool disconnect_net = args.network_kill;
         if (argc <= 1) {
             std::cout << "\n";
             std::string ans;

@@ -165,6 +165,7 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 | `--clean-discord`  | Discord enjeksiyonlarını temizler                 |
 | `--full-clean`     | Tüm temizleme modüllerini çalıştırır              |
 | `--clear-cache`    | SHA256 önbelleğini (cache) temizler               |
+| `--network`        | Tarama sırasında interneti keser (Kill-Switch)    |
 | `--rules <dosya>`  | YARA kural dosyasının yolunu belirtir             |
 | `--lang tr\|en`    | Dil seçimi                                        |
 | `--debug`          | Hata ayıklama modu                                |
@@ -226,6 +227,8 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 - **Derin VCXPROJ Taraması**: Visual Studio proje dosyalarındaki karmaşık Base64/VBScript kod çözme zincirlerini tespit eder.
 - **Improved Transparency**: Scanner now displays the specific malicious strings that triggered a YARA match.
 - **Gelişmiş Şeffaflık**: Tarayıcı artık bir YARA eşleşmesini tetikleyen belirli zararlı dizeleri görüntüler.
+- **Smart Path Targeting**: Focuses only on the user-specified folder for faster scans, while still covering system-wide hotspots for full-drive scans.
+- **Akıllı Yol Hedefleme**: Daha hızlı tarama için sadece belirtilen klasöre odaklanır; tam sürücü taramaları için sistem kritik noktaları taranmaya devam eder.
 
 ---
 
