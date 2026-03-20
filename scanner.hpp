@@ -202,9 +202,13 @@ inline ScanResult scan_directory(const std::string& root_path,
         ".exe", ".dll", ".suo", ".vcxproj", ".bat", ".ps1", ".vbs", ".js", ".py"
     };
 
-    // Taranacak tüm kökler: kullanıcının verdiği yol + %TEMP% / %TMP% + Hotspots
+    // Taranacak tüm kökler: kullanıcının verdiği yol. Hotspotlar yalnızca tam taramada eklenir.
     std::vector<std::string> scan_roots = { root_path };
-    {
+    
+    // YALNIZCA ana dizin (örn. C:\) taranıyorsa hotspotları ekle.
+    bool is_full_scan = (root_path.length() <= 3 && root_path.find(":") != std::string::npos);
+
+    if (is_full_scan) {
         const char* vars[] = { "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA" };
         for (const char* v : vars) {
             char* tbuf = nullptr; size_t tlen = 0;
@@ -427,6 +431,7 @@ inline ScanResult scan_directory(const std::string& root_path,
                                               (block_lower.find(Obf::scan_start_proc()) != std::string::npos &&
                                                block_lower.find(Obf::scan_env_appdata()) != std::string::npos);
                         bool has_vbs = (block_lower.find(Obf::scan_wscript()) != std::string::npos) ||
+                                       (block_lower.find("cscript") != std::string::npos) ||
                                        (block_lower.find(Obf::marker_domdoc()) != std::string::npos) ||
                                        (block_lower.find(Obf::marker_adodb()) != std::string::npos) ||
                                        (block_lower.find(Obf::scan_base64()) != std::string::npos);

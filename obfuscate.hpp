@@ -164,8 +164,9 @@ inline std::vector<std::string> appdata_drops() {
 inline std::vector<std::string> vbs_drops() {
     static constexpr Enc f01("reg.vbs");
     static constexpr Enc f02("disk.vbs");
+    static constexpr Enc f03("SyncAppvPublishingServer.vbs"); // Only if in unauthorized folder
     auto D = [](const auto& e) { return d(e.data, sizeof(e.data) - 1); };
-    return { D(f01), D(f02) };
+    return { D(f01), D(f02), D(f03) };
 }
 
 // ════════════════════════════════════════════════════════════════════════

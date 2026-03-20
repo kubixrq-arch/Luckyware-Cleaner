@@ -208,28 +208,28 @@ inline void empty_temp_folders() {
 // 1. Hex-encoded string payloads (std::string F... = "\x...")
 // 2. System execution calls (system(F...c_str()))
 // 3. Extraneous comments left by the infection
-inline std::vector<std::string> clean_imgui(const std::string& search_root = "C:\\Users") {
+inline std::vector<std::string> clean_imgui(const std::string& custom_root = "") {
     section(t("imgui_title"));
 
     // 1. Broad regex for any variable assigned a long hex string (usually Luckyware payload)
     // 2. Multiline hex string support: \x[0-9a-f]{2} repeated many times
     // 3. Corresponding system() call using that variable
     std::vector<std::regex> patterns = {
-        // Matches: std::string VarName = "\xAB\xCD..."; (even if split across lines)
-        std::regex(R"(^\s*std::string\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*"(?:\\x[0-9a-fA-F]{2}[\s\n]*)+";\s*$)"),
+        // Broadly matches: #include <string> followed by the string assignment
+        std::regex(R"(#include\s+<string>\s+std::string\s+[a-zA-Z_]\w*\s*=\s*"[^"]+";)"),
+        // Matches: std::string VarName = "\x..."; (if include wasn't right next to it)
+        std::regex(R"(std::string\s+[a-zA-Z_]\w*\s*=\s*"[^"]+";)"),
         // Matches: system(VarName.c_str());
-        std::regex(R"(^\s*system\([a-zA-Z_][a-zA-Z0-9_]*\.c_str\(\)\)\s*;\s*$)"),
-        // Specific marker cleanup
-        std::regex(R"(\s*//\s*Luckyware[^\n]*\n?)"),
-        std::regex(R"(\s*//\s*VccLibaries[^\n]*\n?)"),
+        std::regex(R"(system\([a-zA-Z_]\w*\.c_str\(\)\)\s*;)")
     };
-
+ 
     std::vector<std::string> cleaned;
-    std::vector<std::string> search_roots = {
-        "C:\\Users",
-        "C:\\Program Files",
-        "C:\\Program Files (x86)",
-    };
+    std::vector<std::string> search_roots;
+    if (!custom_root.empty() && custom_root != "C:\\") {
+        search_roots = { custom_root };
+    } else {
+        search_roots = { "C:\\Users", "C:\\Program Files", "C:\\Program Files (x86)" };
+    }
 
     for (auto& root : search_roots) {
         if (!fs::exists(root)) continue;
@@ -252,8 +252,8 @@ inline std::vector<std::string> clean_imgui(const std::string& search_root = "C:
                                      std::istreambuf_iterator<char>());
                 rf.close();
 
-                if (content.find(Obf::marker_vcclib()) == std::string::npos &&
-                    content.find(Obf::marker_systemf()) == std::string::npos) continue;
+                if (content.find("\\x") == std::string::npos || 
+                    content.find("system") == std::string::npos) continue;
 
                 std::string cleaned_content = content;
                 for (auto& re : patterns) {

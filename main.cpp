@@ -382,13 +382,13 @@ int main(int argc, char* argv[]) {
                 Cleaner::clean_registry();
                 Cleaner::update_hosts();
                 Cleaner::clean_sdk();
-                Cleaner::clean_imgui();
+                Cleaner::clean_imgui(args.scan_path);
                 Cleaner::clean_discord();
             } else {
                 if (args.clean_registry_flag)   Cleaner::clean_registry();
                 if (args.unblock)               Cleaner::update_hosts(c2_domains);
                 if (args.clean_sdk_flag)        Cleaner::clean_sdk();
-                if (args.clean_imgui_flag)      Cleaner::clean_imgui();
+                if (args.clean_imgui_flag)      Cleaner::clean_imgui(args.scan_path);
                 if (args.clean_discord_flag)    Cleaner::clean_discord();
             }
 
