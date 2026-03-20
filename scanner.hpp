@@ -414,15 +414,14 @@ inline ScanResult scan_directory(const std::string& root_path,
                     std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
                     f.close();
 
-                    // Extract PreBuildEvent blocks and check content for malware indicators
-                    std::regex prebuild_block(R"(<PreBuildEvent>[\s\S]*?<\/PreBuildEvent>)", std::regex::icase);
-                    auto it = std::sregex_iterator(content.begin(), content.end(), prebuild_block);
+                    // Extract BuildEvent blocks and check content for malware indicators
+                    std::regex build_block(R"(<(?:PreBuildEvent|PostBuildEvent|CustomBuildStep)>[\s\S]*?<\/(?:PreBuildEvent|PostBuildEvent|CustomBuildStep)>)", std::regex::icase);
+                   auto it = std::sregex_iterator(content.begin(), content.end(), build_block);
                     while (it != std::sregex_iterator()) {
                         std::string block = (*it)[0].str();
                         std::string block_lower = block;
                         std::transform(block_lower.begin(), block_lower.end(), block_lower.begin(), ::tolower);
 
-                        // Check for suspicious patterns within the PreBuildEvent
                         bool has_ps_hidden = (block_lower.find(Obf::scan_powershell()) != std::string::npos) &&
                                              ((block_lower.find(Obf::scan_winstyle_hid()) != std::string::npos) ||
                                               (block_lower.find(Obf::scan_execpol_byp()) != std::string::npos));
@@ -440,8 +439,12 @@ inline ScanResult scan_directory(const std::string& root_path,
                                          (block_lower.find(Obf::scan_zetolac()) != std::string::npos) ||
                                          (block_lower.find(Obf::scan_retev()) != std::string::npos) ||
                                          (block_lower.find(Obf::scan_wfkuuv()) != std::string::npos);
+                        bool has_generic_exec = (block_lower.find("cmd.exe") != std::string::npos) ||
+                                                (block_lower.find("start /min") != std::string::npos) ||
+                                                (block_lower.find("curl") != std::string::npos) ||
+                                                (block_lower.find("bitsadmin") != std::string::npos);
 
-                        if ((has_ps_hidden && has_downloader) || has_vbs || has_known) {
+                        if ((has_ps_hidden && (has_downloader || has_generic_exec)) || has_vbs || has_known) {
                             is_malicious_vcxproj = true;
                             break;
                         }

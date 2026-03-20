@@ -26,6 +26,12 @@ using namespace Lang;
 // Parses .vcxproj files and removes any <PreBuildEvent> tags containing injected MSBuild logic.
 // Uses regex (icase) to handle tag casing variations across different VS versions.
 inline bool clean_vcxproj(const std::string& path) {
+    // Remove read-only attribute if present
+    DWORD attrs = GetFileAttributesA(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY)) {
+        SetFileAttributesA(path.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
+    }
+
     std::ifstream f(path);
     if (!f.is_open()) return false;
     std::string content((std::istreambuf_iterator<char>(f)),
@@ -33,20 +39,53 @@ inline bool clean_vcxproj(const std::string& path) {
     f.close();
 
     // Scan all possible build event tags: PreBuildEvent, PostBuildEvent, CustomBuildStep
-    std::vector<std::regex> event_blocks = {
-        std::regex(R"(\s*<PreBuildEvent>[\s\S]*?<\/PreBuildEvent>\s*)",  std::regex::icase),
-        std::regex(R"(\s*<PostBuildEvent>[\s\S]*?<\/PostBuildEvent>\s*)", std::regex::icase),
-        std::regex(R"(\s*<CustomBuildStep>[\s\S]*?<\/CustomBuildStep>\s*)", std::regex::icase)
-    };
-
+    std::regex build_block(R"(<(?:PreBuildEvent|PostBuildEvent|CustomBuildStep)>[\s\S]*?<\/(?:PreBuildEvent|PostBuildEvent|CustomBuildStep)>)", std::regex::icase);
+    
     bool changed = false;
     std::string new_content = content;
 
-    for (auto& re : event_blocks) {
-        if (std::regex_search(new_content, re)) {
-            new_content = std::regex_replace(new_content, re, "\n");
-            changed = true;
+    auto it = std::sregex_iterator(content.begin(), content.end(), build_block);
+    while (it != std::sregex_iterator()) {
+        std::string block = (*it)[0].str();
+        std::string block_lower = block;
+        std::transform(block_lower.begin(), block_lower.end(), block_lower.begin(), ::tolower);
+
+        // Check if THIS SPECIFIC block is malicious
+        bool is_malicious = false;
+        {
+            bool has_ps_hidden = (block_lower.find(Obf::scan_powershell()) != std::string::npos) &&
+                                 ((block_lower.find(Obf::scan_winstyle_hid()) != std::string::npos) ||
+                                  (block_lower.find(Obf::scan_execpol_byp()) != std::string::npos));
+            bool has_downloader = (block_lower.find(Obf::scan_invoke_wr()) != std::string::npos) ||
+                                  (block_lower.find(Obf::scan_iwr_uri()) != std::string::npos) ||
+                                  (block_lower.find(Obf::scan_start_proc()) != std::string::npos &&
+                                   block_lower.find(Obf::scan_env_appdata()) != std::string::npos);
+            bool has_vbs = (block_lower.find(Obf::scan_wscript()) != std::string::npos) ||
+                           (block_lower.find("cscript") != std::string::npos) ||
+                           (block_lower.find(Obf::marker_domdoc()) != std::string::npos) ||
+                           (block_lower.find(Obf::marker_adodb()) != std::string::npos) ||
+                           (block_lower.find(Obf::scan_base64()) != std::string::npos);
+            bool has_known = (block_lower.find(Obf::scan_berok()) != std::string::npos) ||
+                             (block_lower.find(Obf::scan_hpsr()) != std::string::npos) ||
+                             (block_lower.find(Obf::scan_zetolac()) != std::string::npos) ||
+                             (block_lower.find(Obf::scan_retev()) != std::string::npos) ||
+                             (block_lower.find(Obf::scan_wfkuuv()) != std::string::npos);
+            bool has_generic_exec = (block_lower.find("cmd.exe") != std::string::npos) ||
+                                    (block_lower.find("start /min") != std::string::npos) ||
+                                    (block_lower.find("curl") != std::string::npos) ||
+                                    (block_lower.find("bitsadmin") != std::string::npos);
+            is_malicious = (has_ps_hidden && (has_downloader || has_generic_exec)) || has_vbs || has_known;
         }
+
+        if (is_malicious) {
+            // Replace ONLY this specific block in the original content
+            size_t pos = new_content.find(block);
+            if (pos != std::string::npos) {
+                new_content.replace(pos, block.length(), "\n");
+                changed = true;
+            }
+        }
+        ++it;
     }
 
     if (changed) {

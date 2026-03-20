@@ -380,7 +380,8 @@ int main(int argc, char* argv[]) {
         // OPTIONAL: auto-clean flags passed on command line
         // -------------------------------------------------------
         if (args.auto_clean || args.unblock || args.clean_registry_flag ||
-            args.clean_sdk_flag || args.clean_imgui_flag || args.clean_discord_flag || args.full_clean_flag) {
+            args.clean_sdk_flag || args.clean_imgui_flag || args.clean_discord_flag || 
+            args.full_clean_flag || args.clean_vcxproj_flag) {
 
             if (args.full_clean_flag) {
                 Cleaner::clean_registry();
@@ -388,6 +389,11 @@ int main(int argc, char* argv[]) {
                 Cleaner::clean_sdk();
                 Cleaner::clean_imgui(args.scan_path);
                 Cleaner::clean_discord();
+                if (!infected.empty()) {
+                    for (const auto& file : infected) {
+                        if (fs::path(file).extension() == ".vcxproj") Cleaner::clean_vcxproj(file);
+                    }
+                }
             } else {
                 if (args.clean_registry_flag)   Cleaner::clean_registry();
                 if (args.unblock)               Cleaner::update_hosts(c2_domains);
@@ -400,6 +406,7 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
+
 
             if (!infected.empty()) {
                 auto programs = Cleaner::find_affected_programs(infected);
@@ -439,10 +446,16 @@ int main(int argc, char* argv[]) {
         }
 
         if (total_threats > 0) {
-            if (argc <= 1) {
+            bool has_clean_flags = args.auto_clean || args.unblock || args.clean_registry_flag ||
+                                   args.clean_sdk_flag || args.clean_imgui_flag || args.clean_discord_flag ||
+                                   args.full_clean_flag || args.clean_vcxproj_flag;
+
+            if (!has_clean_flags) {
                 std::string ans;
                 std::cout << "  " << C::WHITE << t("ask_clean_interactive") << C::RESET;
+                std::cin.clear();
                 std::getline(std::cin, ans);
+                if (ans.empty()) std::getline(std::cin, ans); // Catch leading newline
 
                 if (ans == "e" || ans == "y" || ans == "evet" || ans == "yes" || ans == "E" || ans == "Y") {
                     std::cout << "\n";
