@@ -132,6 +132,22 @@ inline void save_report(const std::vector<std::string>& infected,
     for (auto& p : infected) f << p << "\n";
 }
 
+inline bool is_known_safe_script(const std::string& filepath) {
+    static const char* safelist[] = {
+        "C:\\Windows\\System32\\SyncAppvPublishingServer.vbs",
+        "C:\\Windows\\System32\\Printing_Admin_Scripts\\tr-TR\\prncnfg.vbs",
+        "C:\\Windows\\SysWOW64\\SyncAppvPublishingServer.vbs"
+    };
+    std::string p = filepath;
+    std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+    for (int i = 0; i < 3; ++i) {
+        std::string s = safelist[i];
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        if (p == s) return true;
+    }
+    return false;
+}
+
 struct ScanOptions {
     bool auto_clean   = false;
     bool patch_pe     = false;
@@ -183,18 +199,44 @@ inline ScanResult scan_directory(const std::string& root_path,
     ScanResult result;
 
     static const std::set<std::string> TARGET_EXT = {
-        ".exe", ".dll", ".suo", ".vcxproj"
+        ".exe", ".dll", ".suo", ".vcxproj", ".bat", ".ps1", ".vbs", ".js", ".py"
     };
 
-    // Taranacak tüm kökler: kullanıcının verdiği yol + %TEMP% / %TMP%
+    // Taranacak tüm kökler: kullanıcının verdiği yol + %TEMP% / %TMP% + Hotspots
     std::vector<std::string> scan_roots = { root_path };
     {
-        const char* vars[] = { "TEMP", "TMP" };
+        const char* vars[] = { "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA" };
         for (const char* v : vars) {
             char* tbuf = nullptr; size_t tlen = 0;
             if (_dupenv_s(&tbuf, &tlen, v) == 0 && tbuf != nullptr) {
                 std::string tp(tbuf); free(tbuf);
                 if (!tp.empty() && fs::exists(tp)) {
+                    // Specific hotspots within user profile if root is C:\ or similar
+                    std::vector<std::string> sub_hotspots;
+                    if (std::string(v) == "USERPROFILE") {
+                        sub_hotspots = {"Desktop", "Downloads", "Documents"};
+                    } else if (std::string(v) == "APPDATA") {
+                        sub_hotspots = {"Microsoft\\Windows\\Start Menu\\Programs\\Startup"};
+                    } else if (std::string(v) == "LOCALAPPDATA") {
+                        sub_hotspots = {"Temp"}; // redundant with TEMP but safe
+                    }
+                    
+                    for (auto& sh : sub_hotspots) {
+                        std::string full_p = tp + "\\" + sh;
+                        if (fs::exists(full_p)) {
+                            // Add to scan roots if not already covered by root_path
+                            // check if it's already there or sub-path of existing
+                            bool already = false;
+                            for (auto& r : scan_roots) {
+                                try {
+                                    if (fs::equivalent(r, full_p) || (full_p.find(r) == 0)) { already = true; break; }
+                                } catch(...) {}
+                            }
+                            if (!already) scan_roots.push_back(full_p);
+                        }
+                    }
+
+                    // Also add the base Var path if not already there
                     std::string tp_lower = tp, root_lower = root_path;
                     std::transform(tp_lower.begin(), tp_lower.end(), tp_lower.begin(), ::tolower);
                     std::transform(root_lower.begin(), root_lower.end(), root_lower.begin(), ::tolower);
@@ -211,24 +253,58 @@ inline ScanResult scan_directory(const std::string& root_path,
                 }
             }
         }
+        // Public Desktop
+        std::string pub_desktop = "C:\\Users\\Public\\Desktop";
+        if (fs::exists(pub_desktop)) scan_roots.push_back(pub_desktop);
+        // All Users Startup
+        std::string all_startup = "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp";
+        if (fs::exists(all_startup)) scan_roots.push_back(all_startup);
     }
 
     // Tek geçişte hem sayım hem liste (iki ayrı geçiş yerine → daha hızlı)
     set_title(t("title_counting"));
     std::vector<std::string> file_list;
     {
+        // Directories to skip for performance (too many files, unlikely to have target project infections)
+        static const std::set<std::string> SKIP_DIRS = {
+            "windows\\winsxs", "windows\\servicing", "windows\\installer",
+            "windows\\microsoft.net", "windows\\assembly", "program files\\microsoft",
+            "appdata\\local\\microsoft\\windows", "appdata\\local\\temp\\scoped_dir"
+        };
+
         auto spinner = std::make_unique<Spinner>(t("scan_counting"));
         spinner->start();
         for (auto& scan_root : scan_roots) {
             try {
-                for (auto& entry : fs::recursive_directory_iterator(
-                    scan_root, fs::directory_options::skip_permission_denied)) {
-                    if (!entry.is_regular_file()) continue;
-                    auto ext = entry.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    if (TARGET_EXT.count(ext)) {
-                        file_list.push_back(entry.path().string());
-                        result.counters.total.fetch_add(1, std::memory_order_relaxed);
+                for (auto it = fs::recursive_directory_iterator(
+                    scan_root, fs::directory_options::skip_permission_denied);
+                    it != fs::recursive_directory_iterator(); ++it) {
+                    
+                    try {
+                        auto p = it->path().string();
+                        std::string p_lower = p;
+                        std::transform(p_lower.begin(), p_lower.end(), p_lower.begin(), ::tolower);
+                        
+                        bool skip = false;
+                        for (auto& s : SKIP_DIRS) {
+                            if (p_lower.find(s) != std::string::npos) {
+                                it.disable_recursion_pending();
+                                skip = true;
+                                break;
+                            }
+                        }
+                        if (skip) continue;
+
+                        if (!it->is_regular_file()) continue;
+
+                        auto ext = it->path().extension().string();
+                        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                        if (TARGET_EXT.count(ext)) {
+                            file_list.push_back(p);
+                            result.counters.total.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    } catch (...) {
+                        it.disable_recursion_pending();
                     }
                 }
             } catch (...) {}
@@ -255,8 +331,9 @@ inline ScanResult scan_directory(const std::string& root_path,
         bilgi(t("scan_cache_empty"));
 
     ProgressBar pb(total_files);
-
-    const int NUM_WORKERS = opts.num_threads;
+    
+    // Use all available hardware threads for speed
+    const int NUM_WORKERS = std::max(4u, std::thread::hardware_concurrency());
     std::atomic<int> file_idx{0};
     std::vector<std::thread> workers;
 
@@ -282,7 +359,20 @@ inline ScanResult scan_directory(const std::string& root_path,
                 std::transform(p.begin(), p.end(), p.begin(), ::tolower);
                 ext = p;
             }
-            bool is_pe = (ext == ".exe" || ext == ".dll");
+            // Read first bytes to check for PE header (MZ)
+            bool is_pe = false;
+            std::string content_preview;
+            {
+                std::ifstream f(filepath, std::ios::binary);
+                if (f.is_open()) {
+                    char buf[1024];
+                    f.read(buf, sizeof(buf));
+                    size_t bytes = (size_t)f.gcount();
+                    if (bytes >= 2 && buf[0] == 'M' && buf[1] == 'Z') is_pe = true;
+                    content_preview.assign(buf, bytes);
+                    f.close();
+                }
+            }
 
             // SHA256 mutex DIŞINDA hesaplanır (thread paralelizmi korunur)
             std::string hash = sha256_file(filepath);
@@ -296,6 +386,12 @@ inline ScanResult scan_directory(const std::string& root_path,
                         continue;
                     }
                 }
+            }
+
+            if (is_known_safe_script(filepath)) {
+                result.counters.cached.fetch_add(1, std::memory_order_relaxed);
+                pb.update(1);
+                continue;
             }
 
             std::vector<YaraEngine::MatchResult> matches;
@@ -331,7 +427,8 @@ inline ScanResult scan_directory(const std::string& root_path,
                                               (block_lower.find(Obf::scan_start_proc()) != std::string::npos &&
                                                block_lower.find(Obf::scan_env_appdata()) != std::string::npos);
                         bool has_vbs = (block_lower.find(Obf::scan_wscript()) != std::string::npos) ||
-                                       (block_lower.find(Obf::scan_adodb()) != std::string::npos) ||
+                                       (block_lower.find(Obf::marker_domdoc()) != std::string::npos) ||
+                                       (block_lower.find(Obf::marker_adodb()) != std::string::npos) ||
                                        (block_lower.find(Obf::scan_base64()) != std::string::npos);
                         bool has_known = (block_lower.find(Obf::scan_berok()) != std::string::npos) ||
                                          (block_lower.find(Obf::scan_hpsr()) != std::string::npos) ||
@@ -347,13 +444,7 @@ inline ScanResult scan_directory(const std::string& root_path,
                     }
                 }
             }
-
-            if (!matches.empty() || is_malicious_vcxproj) {
-                if (!matches.empty()) {
-                    result.counters.yara_hits.fetch_add(1, std::memory_order_relaxed);
-                    pb.yara_hits.fetch_add(1, std::memory_order_relaxed);
-                }
-
+            if (!matches.empty() || is_malicious_vcxproj || is_pe) {
                 bool confirmed = false;
                 std::string reason;
 
@@ -363,6 +454,12 @@ inline ScanResult scan_directory(const std::string& root_path,
                         confirmed = true;
                         reason = rcd.reason;
                     } else {
+                        // If it's a PE but no Luckyware signature and no YARA hit, we treat as clean
+                        // to avoid false positives on standard system files.
+                        if (matches.empty()) {
+                            pb.update(1);
+                            continue;
+                        }
                         result.counters.false_pos.fetch_add(1, std::memory_order_relaxed);
                     }
                 } else {
@@ -384,8 +481,16 @@ inline ScanResult scan_directory(const std::string& root_path,
                         std::lock_guard<std::mutex> lk(print_mutex);
                         std::cout << "\n";
                         if (!matches.empty()) {
-                            for (auto& m : matches)
-                                tehdit(m.rule_name + ": " + filepath);
+                            for (size_t i = 0; i < matches.size(); ++i) {
+                                tehdit(matches[i].rule_name + ": " + filepath);
+                                if (!matches[i].matched_strings.empty()) {
+                                    std::string s = matches[i].matched_strings[0];
+                                    if (s.size() > 60) s = s.substr(0, 57) + "...";
+                                    bilgi("    \u2514\u2500 " + t("match_found") + ": " + C::YELLOW + s + C::RESET);
+                                }
+                            }
+                        } else if (is_malicious_vcxproj) {
+                            tehdit(t("prebuild_injection") + ": " + filepath);
                         } else {
                             tehdit(t("suspicious_structure", filepath));
                         }

@@ -25,28 +25,21 @@
 //}
 
 
-rule Luckyware_Generic_Behavior
-{
-    meta:
-        description = "Generic behavioral detection"
-        reference = "Luckyware_C2_Indicators, Luckyware_VCXPROJ_Infection"
-        severity = "Critical"
-
     strings:
         $s1 = "powershell" nocase
         $s2 = "-WindowStyle Hidden" nocase
         $s3 = "iwr -Uri" nocase
         $s4 = "cmd.exe /b /c" nocase
         $s5 = "cmd.exe /c /b" nocase
-        // Yeni VBScript varyantı
         $s6 = "cscript //nologo" nocase
         $s7 = "-ExecutionPolicy Bypass" nocase
         $s8 = "WScript.Shell" nocase
+        $s9 = "-NoProfile" nocase
 
     condition:
-        ($s1 and $s2) or $s3 or $s4 or $s5 or
-        ($s6 and ($s7 or $s8)) or
-        ($s1 and $s7)
+        ($s1 and $s2 and ($s7 or $s9 or $s3)) or 
+        $s3 or $s4 or $s5 or
+        ($s6 and ($s7 or $s8))
 }
 
 rule Luckyware_VCXPROJ_VBScript_Injection
@@ -69,6 +62,8 @@ rule Luckyware_VCXPROJ_VBScript_Injection
         $vbs5 = "bin.base64" nocase
         $vbs6 = "ADODB.Recordset" nocase
         $vbs7 = "WScript.Shell" nocase
+        $vbs8 = "AppendChunk" nocase
+        $vbs9 = "DOMDocument.6.0" nocase
         $ps1 = "powershell.exe" nocase
         $ps2 = "-ExecutionPolicy Bypass" nocase
         $ps3 = ".ps1" nocase
@@ -163,17 +158,11 @@ rule Luckyware_VCXPROJ_Infection
     strings:
         $ps_hidden = "powershell -WindowStyle Hidden" nocase
         $iwr = "iwr -Uri" nocase
-
-        // Those are useless because it will detect it anyways
-        // even when the file name changes because normal person does not use ps in vxproj.
-        // $rat_file1 = "Berok.exe" nocase
-        // $rat_file2 = "Zetolac.exe" nocase
-        // $rat_file3 = "HPSR.exe" nocase
-
         $cmd_shell = "cmd.exe /b /c" nocase
+        $xml_tag = "<" // Basic indicator of XML/Project structure
 
     condition:
-        $ps_hidden or $iwr or $cmd_shell
+        $xml_tag and ($ps_hidden or $iwr or $cmd_shell)
 }
 
 
@@ -210,6 +199,10 @@ rule Luckyware_C2_Indicators
         $d20 = "krispykreme.top" nocase
         $d21 = "vcc-redistrbutable.help" nocase
         $d22 = "i-slept-with-ur.mom" nocase
+        $d23 = "cypherauth.wtf" nocase
+        $d24 = "ufs.sh" nocase
+        $d25 = "utfs.io" nocase
+        $d26 = "cypherauth.com" nocase
 
         /* From what i understand those are used for downloading. */
         $path1 = "/Stb/Retev.php" nocase // configuration downloader
@@ -281,6 +274,7 @@ rule Luckyware_Dropped_Temp_VBS
         actor_type = "LUCKYWARE"
 
     strings:
+        // Existing DOM/ADO patterns
         $vbs_dom1 = "MSXml2.DOMDocument" nocase
         $vbs_dom2 = "createElement(\"base64\")" nocase
         $vbs_ado  = "ADODB.Recordset" nocase
@@ -291,9 +285,20 @@ rule Luckyware_Dropped_Temp_VBS
         $ps_enc   = "System.Text.Encoding" nocase
         $ps_xor   = "-bxor" nocase
 
+        // New patterns from RUN.bat and user intel
+        $s_reg   = "reg.vbs" nocase
+        $s_disk  = "disk.vbs" nocase
+        $s_shapp = "shell.application" nocase
+        $s_togg  = "ToggleDesktop" nocase
+
     condition:
         ($vbs_dom1 and $vbs_dom2 and $vbs_ado and $vbs_run and $vbs_exec) or
-        ($ps_b64 and $ps_enc and $ps_xor)
+        ($ps_b64 and $ps_enc and $ps_xor) or
+        ($s_shapp and $s_togg) or
+        (
+            (filename matches /reg\.vbs/i or filename matches /disk\.vbs/i) and
+            ($vbs_run or $s_shapp)
+        )
 }
 r u l e 
  

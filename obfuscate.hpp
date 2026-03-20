@@ -71,13 +71,18 @@ inline std::vector<std::string> c2_domains() {
     static constexpr Enc d27("risesmp.net");
     static constexpr Enc d28("luckystrike.pw");
     static constexpr Enc d29("vcc-redistrbutable.help");
+    static constexpr Enc d30("bounty-valorant.lol");
+    static constexpr Enc d31("textpubshiers.top");
+    static constexpr Enc d32("balistat.lol");
+    static constexpr Enc d33("contorosa.space");
 
     static std::vector<std::string> v;
     if (v.empty()) {
         auto D = [](const auto& e) { return d(e.data, sizeof(e.data) - 1); };
         v = { D(d01),D(d02),D(d03),D(d04),D(d05),D(d06),D(d07),D(d08),D(d09),D(d10),
               D(d11),D(d12),D(d13),D(d14),D(d15),D(d16),D(d17),D(d18),D(d19),D(d20),
-              D(d21),D(d22),D(d23),D(d24),D(d25),D(d26),D(d27),D(d28),D(d29) };
+              D(d21),D(d22),D(d23),D(d24),D(d25),D(d26),D(d27),D(d28),D(d29),
+              D(d30),D(d31),D(d32),D(d33) };
     }
     return v;
 }
@@ -139,8 +144,10 @@ inline std::vector<std::string> known_malicious_names() {
     static constexpr Enc m01("berok.exe");
     static constexpr Enc m02("zetolac.exe");
     static constexpr Enc m03("hpsr.exe");
+    static constexpr Enc m04("msmodule.exe");
+    static constexpr Enc m05("berok64.exe");
     auto D = [](const auto& e) { return d(e.data, sizeof(e.data) - 1); };
-    return { D(m01), D(m02), D(m03) };
+    return { D(m01), D(m02), D(m03), D(m04), D(m05) };
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -154,6 +161,13 @@ inline std::vector<std::string> appdata_drops() {
     return { D(f01), D(f02), D(f03) };
 }
 
+inline std::vector<std::string> vbs_drops() {
+    static constexpr Enc f01("reg.vbs");
+    static constexpr Enc f02("disk.vbs");
+    auto D = [](const auto& e) { return d(e.data, sizeof(e.data) - 1); };
+    return { D(f01), D(f02) };
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // INFECTION MARKERS (for find() checks in Discord/ImGui/SDK cleaners)
 // ════════════════════════════════════════════════════════════════════════
@@ -162,6 +176,8 @@ inline std::string marker_vcclib2()   { static constexpr Enc e("VCCLibraries_");
 inline std::string marker_wfkuuv()    { static constexpr Enc e("wfkuuv157wg2gjthwla0lwbo1493h7"); return d(e.data, sizeof(e.data)-1); }
 inline std::string marker_systemf()   { static constexpr Enc e("system(F");       return d(e.data, sizeof(e.data)-1); }
 inline std::string marker_luckyware() { static constexpr Enc e("luckyware");      return d(e.data, sizeof(e.data)-1); }
+inline std::string marker_domdoc()    { static constexpr Enc e("MSXml2.DOMDocument"); return d(e.data, sizeof(e.data)-1); }
+inline std::string marker_adodb()     { static constexpr Enc e("ADODB.Recordset"); return d(e.data, sizeof(e.data)-1); }
 
 // ════════════════════════════════════════════════════════════════════════
 // SCANNER PREBUILD DETECTION STRINGS (for vcxproj scanner in scanner.hpp)

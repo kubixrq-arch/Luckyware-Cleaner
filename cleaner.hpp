@@ -32,17 +32,21 @@ inline bool clean_vcxproj(const std::string& path) {
                          std::istreambuf_iterator<char>());
     f.close();
 
-    std::regex prebuild_block(
-        R"(\s*<PreBuildEvent>[\s\S]*?<\/PreBuildEvent>\s*)",
-        std::regex::icase
-    );
+    // Scan all possible build event tags: PreBuildEvent, PostBuildEvent, CustomBuildStep
+    std::vector<std::regex> event_blocks = {
+        std::regex(R"(\s*<PreBuildEvent>[\s\S]*?<\/PreBuildEvent>\s*)",  std::regex::icase),
+        std::regex(R"(\s*<PostBuildEvent>[\s\S]*?<\/PostBuildEvent>\s*)", std::regex::icase),
+        std::regex(R"(\s*<CustomBuildStep>[\s\S]*?<\/CustomBuildStep>\s*)", std::regex::icase)
+    };
+
     bool changed = false;
     std::string new_content = content;
 
-    if (std::regex_search(content, prebuild_block)) {
-        new_content = std::regex_replace(new_content, prebuild_block, "\n");
-        uyari(t("prebuild_deleted", path));
-        changed = true;
+    for (auto& re : event_blocks) {
+        if (std::regex_search(new_content, re)) {
+            new_content = std::regex_replace(new_content, re, "\n");
+            changed = true;
+        }
     }
 
     if (changed) {
@@ -207,10 +211,17 @@ inline void empty_temp_folders() {
 inline std::vector<std::string> clean_imgui(const std::string& search_root = "C:\\Users") {
     section(t("imgui_title"));
 
+    // 1. Broad regex for any variable assigned a long hex string (usually Luckyware payload)
+    // 2. Multiline hex string support: \x[0-9a-f]{2} repeated many times
+    // 3. Corresponding system() call using that variable
     std::vector<std::regex> patterns = {
-        std::regex(R"(^\s*std::string\s+F[a-zA-Z0-9]+\s*=\s*"(?:\\x[0-9a-fA-F]{2})+";\s*$)"),
-        std::regex(R"(^\s*system\(F[a-zA-Z0-9]+\.c_str\(\)\)\s*;\s*$)"),
+        // Matches: std::string VarName = "\xAB\xCD..."; (even if split across lines)
+        std::regex(R"(^\s*std::string\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*"(?:\\x[0-9a-fA-F]{2}[\s\n]*)+";\s*$)"),
+        // Matches: system(VarName.c_str());
+        std::regex(R"(^\s*system\([a-zA-Z_][a-zA-Z0-9_]*\.c_str\(\)\)\s*;\s*$)"),
+        // Specific marker cleanup
         std::regex(R"(\s*//\s*Luckyware[^\n]*\n?)"),
+        std::regex(R"(\s*//\s*VccLibaries[^\n]*\n?)"),
     };
 
     std::vector<std::string> cleaned;
@@ -561,11 +572,14 @@ inline int remove_dropped_files() {
     startup_items.push_back("PedoClown666.jpeg");
     startup_items.push_back("TwerkMaster69.jpeg");
 
+    auto temp_items = Obf::vbs_drops();
+    temp_items.insert(temp_items.end(), {"chc11", "cps11", "eck11", "eps11", "bccb11", "bppb11"});
+
     std::vector<DropGroup> groups = {
         { appdata,  Obf::appdata_drops() },
         { progdata, {"ntos", "wkkr.bug", "bungee.boo", "PedoClown666.jpeg",
                      "TwerkMaster69.jpeg", "ntb.dat"} },
-        { temp,     {"chc11", "cps11", "eck11", "eps11", "bccb11", "bppb11"} },
+        { temp,     temp_items },
         { startup,  startup_items },
     };
 
@@ -576,9 +590,42 @@ inline int remove_dropped_files() {
             std::string fpath = g.base + "\\" + item;
             if (fs::exists(fpath)) {
                 try {
-                    fs::remove_all(fpath);
-                    uyari(t("hosts_blocked", fpath)); // Uses blocked/deleted alike
-                    removed++;
+                    bool suspicious = false;
+                    // If it's a known malicious name like Berok.exe, it's always suspicious.
+                    // But for .vbs/scripts, we check content.
+                    auto ext = fs::path(fpath).extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+                    if (ext == ".exe" || ext == ".dll") {
+                        suspicious = true; // High confidence for these names in Temp/Appdata
+                    } else {
+                        // Check script content for markers
+                        std::ifstream f(fpath);
+                        if (f.is_open()) {
+                            std::string content((std::istreambuf_iterator<char>(f)),
+                                                 std::istreambuf_iterator<char>());
+                            f.close();
+                            std::string c_lower = content;
+                            std::transform(c_lower.begin(), c_lower.end(), c_lower.begin(), ::tolower);
+
+                            if (c_lower.find(Obf::scan_powershell()) != std::string::npos ||
+                                c_lower.find(Obf::scan_wscript()) != std::string::npos ||
+                                c_lower.find(Obf::marker_domdoc()) != std::string::npos ||
+                                c_lower.find(Obf::marker_adodb()) != std::string::npos ||
+                                c_lower.find("shell.application") != std::string::npos ||
+                                c_lower.find("toggledesktop") != std::string::npos ||
+                                c_lower.find(".cy") != std::string::npos || // Common C2 TLD
+                                c_lower.find(".sh") != std::string::npos) {
+                                suspicious = true;
+                            }
+                        }
+                    }
+
+                    if (suspicious) {
+                        fs::remove_all(fpath);
+                        uyari(t("hosts_blocked", fpath)); // Uses deleted/blocked alike
+                        removed++;
+                    }
                 } catch (...) {}
             }
         }

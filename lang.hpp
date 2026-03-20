@@ -170,6 +170,18 @@ inline TextMap TEXTS = {
     // === C2 Blocking ===
     {"blocking_c2",         {{"tr","C2 domainleri HOSTS'a engelleniyor..."},{"en","Blocking C2 domains in HOSTS..."}}},
     
+    // === Internet Control & Advanced Scanning ===
+    {"ask_disconnect_network", {{"tr","  \u26a0 Tarama sirasinda interneti kesmek ister misiniz? [E/H]: "},{"en","  \u26a0 Would you like to disconnect internet during scan? [Y/N]: "}}},
+    {"network_disconnecting", {{"tr","  \u26a0 Internet baglantisi kesiliyor..."},{"en","  \u26a0 Disconnecting internet connection..."}}},
+    {"network_restoring",   {{"tr","  \u2705 Internet baglantisi geri getiriliyor..."},{"en","  \u2705 Restoring internet connection..."}}},
+    {"network_disconnected", {{"tr","  \u2705 Internet baglantisi kesildi."},{"en","  \u2705 Internet connection disconnected."}}},
+    {"network_restored",    {{"tr","  \u2705 Internet baglantisi geri getirildi."},{"en","  \u2705 Internet connection restored."}}},
+    {"sys_integrity_title", {{"tr","[Sistem Butunluk Kontrolu]"},{"en","[System Integrity Check]"}}},
+    {"checking_cldapi",     {{"tr","  \u23f3 cldapi.dll kontrol ediliyor..."},{"en","  \u23f3 Checking cldapi.dll..."}}},
+    {"cldapi_clean",        {{"tr","  \u2705 cldapi.dll temiz gorunuyor."},{"en","  \u2705 cldapi.dll looks clean."}}},
+    {"cldapi_infected",     {{"tr","  \u26a0 cldapi.dll ENFEKTE! (Zararli pe-load saptandi)"},{"en","  \u26a0 cldapi.dll INFECTED! (Malicious pe-load detected)"}}},
+    {"prebuild_injection_short", {{"tr","MSBuild <PreBuildEvent> Enjeksiyonu"},{"en","MSBuild <PreBuildEvent> Injection"}}},
+
     // === Scanner Output ===
     {"cache_cleared",       {{"tr","Cache temizlendi."},{"en","Cache cleared."}}},
     {"scan_cache_empty",    {{"tr","Cache boş/bulunamadı."},{"en","Cache empty/not found."}}},
@@ -177,7 +189,7 @@ inline TextMap TEXTS = {
     {"prebuild_injection",  {{"tr","PreBuildEvent zararlı kod enjeksiyonu tespit edildi"},{"en","PreBuildEvent malicious code injection detected"}}},
     {"suspicious_file",     {{"tr","Şüpheli dosya içeriği tespit edildi"},{"en","Suspicious file content detected"}}},
     {"suspicious_structure",{{"tr","Şüpheli Yapı Tespit Edildi: {}"},{"en","Suspicious Structure Detected: {}"}}},
-    
+    {"match_found",          {{"tr","Eşleşen dize"},{"en","Matched string"}}},
     // === Detector Output ===
     {"static_mutex",        {{"tr","Genel Mutex"},{"en","Global Mutex"}}},
     {"infdll_mutex",        {{"tr","InfDLL dinamik mutex (TheDLL.cpp:117)"},{"en","InfDLL dynamic mutex (TheDLL.cpp:117)"}}},

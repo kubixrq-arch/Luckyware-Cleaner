@@ -93,15 +93,8 @@ inline RcdResult check_rcd_sections(const std::string& filepath) {
                                std::istreambuf_iterator<char>());
     f.close();
 
-    int mz_count = 0;
-    for (size_t i = 0; i + 1 < data.size(); ++i) {
-        if (data[i] == 'M' && data[i+1] == 'Z') ++mz_count;
-    }
-    if (mz_count > 1) {
-        result.found = true;
-        result.reason = "Gömülü PE tespiti: " + std::to_string(mz_count) + " MZ başlığı";
-        return result;
-    }
+    // Removed naive MZ count check as it causes false positives on text files.
+    // Legitimate nested PEs should be detected by specific section scans or YARA.
 
     const std::string xor_key = "NtExploreProcess";
     if (data.size() > xor_key.size()) {

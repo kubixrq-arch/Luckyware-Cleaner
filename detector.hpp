@@ -24,15 +24,18 @@
 #include <algorithm>
 #include <sstream>
 #include <fstream>
+#include <filesystem>
 #include "ui.hpp"
 #include "lang.hpp"
 #include "obfuscate.hpp"
+#include "pe_check.hpp"
 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
 
 namespace Detector {
 
+namespace fs = std::filesystem;
 using namespace UI;
 using namespace Lang;
 
@@ -47,7 +50,7 @@ inline std::map<DWORD, std::string> get_process_list() {
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnap == INVALID_HANDLE_VALUE) return procs;
 
-    PROCESSENTRY32W pe{};
+    PROCESSENTRY32W pe;
     pe.dwSize = sizeof(pe);
     if (Process32FirstW(hSnap, &pe)) {
         do {
@@ -64,7 +67,7 @@ inline std::map<DWORD, std::string> get_process_list() {
 
 struct MutexScanResult {
     std::vector<std::string> found_mutexes;
-    std::map<DWORD, std::string> malicious_pids;  // populated for --kill-process
+    std::map<DWORD, std::string> malicious_pids;
 };
 
 inline MutexScanResult mutex_scan() {
@@ -72,16 +75,19 @@ inline MutexScanResult mutex_scan() {
     section(t("mutex_title"));
 
     bilgi(t("mutex_static"));
-    std::vector<std::pair<std::string, std::string>> static_mutexes = {
-        {"Global\\PFLwrx",    "Luckyware Payload ana mutex (Pyld/dllmain.cpp:571)"},
-        {"Global\\PFLwrxMNN", "Luckyware Payload ikincil mutex (Pyld/dllmain.cpp:586)"},
-    };
-    for (auto& [name, desc] : static_mutexes) {
+    std::vector<std::pair<std::string, std::string>> static_mutexes;
+    static_mutexes.push_back({"Global\\PFLwrx",    "Luckyware Payload ana mutex"});
+    static_mutexes.push_back({"Global\\PFLwrxMNN", "Luckyware Payload ikincil mutex"});
+    static_mutexes.push_back({"Global\\ox_loader", "Luckyware Dropper/Loader mutex"});
+    
+    for (size_t i = 0; i < static_mutexes.size(); ++i) {
+        std::string name = static_mutexes[i].first;
+        std::string desc = static_mutexes[i].second;
         HANDLE h = OpenMutexA(SYNCHRONIZE, FALSE, name.c_str());
         if (h) {
             CloseHandle(h);
             tehdit(t("mutex_active", name));
-            bilgi("  └─ " + desc);
+            bilgi("  \u2514\u2500 " + desc);
             bilgi(t("mutex_lw_running"));
             result.found_mutexes.push_back(name);
         } else {
@@ -89,7 +95,6 @@ inline MutexScanResult mutex_scan() {
         }
     }
 
-    // Dynamic mutex pattern: Global\m<N> where N is zero-padded (TheDLL.cpp:117)
     bilgi(t("mutex_dynamic"));
     for (int len = 4; len <= 8; ++len) {
         for (int i = 0; i < 10000; i += 1000) {
@@ -100,17 +105,22 @@ inline MutexScanResult mutex_scan() {
             if (h) {
                 CloseHandle(h);
                 tehdit(t("dynamic_mutex_found", test_name));
-                bilgi("  └─ " + t("infdll_mutex"));
+                bilgi("  \u2514\u2500 " + t("infdll_mutex"));
                 result.found_mutexes.push_back(test_name);
             }
         }
     }
 
     bilgi(t("loader_checking"));
-    std::vector<std::string> loader_prefixes = {"Global\\PFNMX_", "Global\\PFNX_"};
-    for (auto& prefix : loader_prefixes) {
-        for (auto& suffix : std::vector<std::string>{"test", "1234", "abcd", "ABCD", "0000"}) {
-            std::string test_name = prefix + suffix;
+    std::vector<std::string> loader_prefixes;
+    loader_prefixes.push_back("Global\\PFNMX_");
+    loader_prefixes.push_back("Global\\PFNX_");
+    for (size_t p = 0; p < loader_prefixes.size(); ++p) {
+        std::string prefix = loader_prefixes[p];
+        std::vector<std::string> suffixes;
+        suffixes.push_back("test"); suffixes.push_back("1234"); suffixes.push_back("abcd");
+        for (size_t s = 0; s < suffixes.size(); ++s) {
+            std::string test_name = prefix + suffixes[s];
             HANDLE h = OpenMutexA(SYNCHRONIZE, FALSE, test_name.c_str());
             if (h) {
                 CloseHandle(h);
@@ -127,28 +137,19 @@ inline MutexScanResult mutex_scan() {
     std::regex bk_re("^bk\\d{6}\\.exe$");
     std::regex hpsr_re("^hpsr\\d{6}\\.exe$");
     std::vector<std::string> known_malicious = Obf::known_malicious_names();
-    // Convert to set for fast lookup
     std::set<std::string> known_malicious_set(known_malicious.begin(), known_malicious.end());
 
-    for (auto& [pid, name] : procs) {
+    for (std::map<DWORD, std::string>::iterator it = procs.begin(); it != procs.end(); ++it) {
+        DWORD pid = it->first;
+        std::string name = it->second;
         if (known_malicious_set.count(name)) {
             tehdit(t("malicious_process", name));
             bilgi(t("dropper_running"));
             result.found_mutexes.push_back("process:" + name);
             result.malicious_pids[pid] = name;
         }
-        if (std::regex_match(name, ox_re)) {
+        if (std::regex_match(name, ox_re) || std::regex_match(name, bk_re) || std::regex_match(name, hpsr_re)) {
             tehdit(t("drop_process", name));
-            result.found_mutexes.push_back("process:" + name);
-            result.malicious_pids[pid] = name;
-        }
-        if (std::regex_match(name, bk_re)) {
-            tehdit(t("sdk_drop_proc", name));
-            result.found_mutexes.push_back("process:" + name);
-            result.malicious_pids[pid] = name;
-        }
-        if (std::regex_match(name, hpsr_re)) {
-            tehdit(t("imgui_drop_proc", name));
             result.found_mutexes.push_back("process:" + name);
             result.malicious_pids[pid] = name;
         }
@@ -158,7 +159,7 @@ inline MutexScanResult mutex_scan() {
     if (!result.found_mutexes.empty()) {
         std::cout << "  " << C::RED;
         for (int i = 0; i < 56; ++i) std::cout << "\u2588";
-        std::cout << "\n  " << "  \u26a0  " << t("mutex_found_count", result.found_mutexes.size()) << "\n";
+        std::cout << "\n  " << "  \u26a0  " << t("mutex_found_count", std::to_string(result.found_mutexes.size())) << "\n";
         for (int i = 0; i < 56; ++i) std::cout << "\u2588";
         std::cout << C::RESET << "\n";
     } else {
@@ -171,9 +172,6 @@ struct LoaderResult {
     std::vector<ProcessInfo> found;
 };
 
-// Scans readable RW memory regions of known Luckyware target processes for the
-// shared-memory signature 0xBA73593C (Loader.cpp:603).
-// Limits scanning to 50 regions per process and 64 KB per region for performance.
 inline LoaderResult loader_scan() {
     LoaderResult result;
     section(t("loader_title"));
@@ -182,44 +180,43 @@ inline LoaderResult loader_scan() {
     uint8_t sig_bytes[4];
     std::memcpy(sig_bytes, &SIGNATURE, 4);
 
-    static const std::set<std::string> target_procs = {
+    static const char* target_arr[] = {
         "dllhost.exe", "svchost.exe", "disksnapshot.exe",
         "fontdrvhost.exe", "icacls.exe", "ktmutil.exe",
         "label.exe", "legacynetuxhost.exe", "licensingdiag.exe"
     };
+    std::set<std::string> target_procs;
+    for (int i = 0; i < 9; ++i) target_procs.insert(target_arr[i]);
 
     auto procs = get_process_list();
-    for (auto& [pid, name] : procs) {
+    for (std::map<DWORD, std::string>::iterator it = procs.begin(); it != procs.end(); ++it) {
+        DWORD pid = it->first;
+        std::string name = it->second;
         if (!target_procs.count(name)) continue;
 
         HANDLE hProc = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
         if (!hProc) continue;
 
-        MEMORY_BASIC_INFORMATION mbi{};
+        MEMORY_BASIC_INFORMATION mbi;
         uintptr_t addr = 0;
         int regions_scanned = 0;
         bool found_sig = false;
 
         while (regions_scanned < 50) {
             if (!VirtualQueryEx(hProc, (LPCVOID)addr, &mbi, sizeof(mbi))) break;
-
-            if (mbi.State == MEM_COMMIT &&
-                (mbi.Protect & PAGE_READWRITE) &&
-                mbi.RegionSize <= 0x100000) {
-                size_t read_size = std::min(mbi.RegionSize, (SIZE_T)0x10000);
+            if (mbi.State == MEM_COMMIT && (mbi.Protect & PAGE_READWRITE) && mbi.RegionSize <= 0x100000) {
+                size_t read_size = std::min((SIZE_T)mbi.RegionSize, (SIZE_T)0x10000);
                 std::vector<uint8_t> buf(read_size);
                 SIZE_T bytes_read = 0;
                 if (ReadProcessMemory(hProc, mbi.BaseAddress, buf.data(), read_size, &bytes_read)) {
-                    auto it = std::search(buf.begin(), buf.begin() + bytes_read,
-                                         sig_bytes, sig_bytes + 4);
-                    if (it != buf.begin() + bytes_read) {
+                    auto search_it = std::search(buf.begin(), buf.begin() + bytes_read, sig_bytes, sig_bytes + 4);
+                    if (search_it != buf.begin() + bytes_read) {
                         tehdit(t("loader_sharedmem", std::to_string(pid)));
                         bilgi("  \u2514\u2500 " + name + " (PID=" + std::to_string(pid) + ")");
                         bilgi("  \u2514\u2500 " + t("loader_running"));
-                        ProcessInfo pi{pid, name, "shared_memory_signature"};
+                        ProcessInfo pi = {pid, name, "shared_memory_signature"};
                         result.found.push_back(pi);
-                        found_sig = true;
-                        break;
+                        found_sig = true; break;
                     }
                 }
                 regions_scanned++;
@@ -234,7 +231,7 @@ inline LoaderResult loader_scan() {
     std::cout << "\n";
     if (result.found.empty()) basari(t("loader_clean"));
     else {
-        std::cout << "  " << C::RED << t("loader_found", result.found.size()) << C::RESET << "\n";
+        std::cout << "  " << C::RED << t("loader_found", std::to_string(result.found.size())) << C::RESET << "\n";
     }
     return result;
 }
@@ -243,90 +240,79 @@ struct HollowResult {
     std::vector<ProcessInfo> found;
 };
 
-// Lightweight hollowing heuristic using CreateToolhelp32Snapshot + GetModuleFileNameEx.
-// Flags anomalies: single thread count (CREATE_SUSPENDED indicator) or path mismatch
-// between the expected system path and the actual executable path.
 inline HollowResult hollow_scan() {
     HollowResult result;
     section(t("hollow_title"));
 
-    struct TargetProc {
-        std::string name;
-        std::string expected_path;
-        std::string expected_arg;  // reserved for future argument-based checks
-    };
+    struct TargetProc { std::string name; std::string expected_path; };
+    std::vector<TargetProc> targets;
+    targets.push_back({"dllhost.exe",      "c:\\windows\\system32\\dllhost.exe"});
+    targets.push_back({"svchost.exe",      "c:\\windows\\system32\\svchost.exe"});
+    targets.push_back({"fontdrvhost.exe",  "c:\\windows\\system32\\fontdrvhost.exe"});
+    targets.push_back({"disksnapshot.exe", "c:\\windows\\system32\\disksnapshot.exe"});
+    targets.push_back({"icacls.exe",       "c:\\windows\\system32\\icacls.exe"});
+    targets.push_back({"ktmutil.exe",      "c:\\windows\\system32\\ktmutil.exe"});
+    targets.push_back({"label.exe",        "c:\\windows\\system32\\label.exe"});
+    targets.push_back({"logman.exe",       "c:\\windows\\system32\\logman.exe"});
+    targets.push_back({"pathping.exe",     "c:\\windows\\system32\\pathping.exe"});
+    targets.push_back({"print.exe",        "c:\\windows\\system32\\print.exe"});
+    targets.push_back({"reg.exe",          "c:\\windows\\system32\\reg.exe"});
+    targets.push_back({"sc.exe",           "c:\\windows\\system32\\sc.exe"});
+    targets.push_back({"sihost.exe",       "c:\\windows\\system32\\sihost.exe"});
 
-    std::vector<TargetProc> targets = {
-        {"dllhost.exe",      "c:\\windows\\system32\\dllhost.exe",     "/processid:"},
-        {"svchost.exe",      "c:\\windows\\system32\\svchost.exe",     "-k "},
-        {"fontdrvhost.exe",  "c:\\windows\\system32\\fontdrvhost.exe", ""},
-        {"disksnapshot.exe", "c:\\windows\\system32\\disksnapshot.exe",""},
-        {"icacls.exe",       "c:\\windows\\system32\\icacls.exe",      ""},
-        {"ktmutil.exe",      "c:\\windows\\system32\\ktmutil.exe",     ""},
-    };
-
-    for (auto& target : targets) {
-        bilgi(t("check_proc") + C::CYAN + target.name);
+    for (size_t i = 0; i < targets.size(); ++i) {
+        std::string target_name = targets[i].name;
+        std::string expected_path = targets[i].expected_path;
+        bilgi(t("check_proc") + C::CYAN + target_name);
 
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (hSnap == INVALID_HANDLE_VALUE) continue;
 
-        PROCESSENTRY32W pe{};
+        PROCESSENTRY32W pe;
         pe.dwSize = sizeof(pe);
         if (Process32FirstW(hSnap, &pe)) {
             do {
                 char nameBuf[MAX_PATH] = {};
-                WideCharToMultiByte(CP_ACP, 0, pe.szExeFile, -1, nameBuf, MAX_PATH, nullptr, nullptr);
+                WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, nameBuf, MAX_PATH, nullptr, nullptr);
                 std::string proc_name = nameBuf;
                 std::transform(proc_name.begin(), proc_name.end(), proc_name.begin(), ::tolower);
-                if (proc_name != target.name) continue;
+                if (proc_name != target_name) continue;
 
                 DWORD pid = pe.th32ProcessID;
                 std::vector<std::string> anomalies;
 
-                // Single-thread heuristic: safe for most processes but skip for
-                // svchost.exe — legitimate svchost instances can start with 1 thread
-                // and killing the wrong one causes BSOD / critical-service crash.
-                if (pe.cntThreads <= 1 && target.name != "svchost.exe") {
+                if (pe.cntThreads <= 1 && target_name != "svchost.exe") {
                     anomalies.push_back(t("single_thread_proc"));
                 }
 
-                bool has_path_mismatch = false;
+                bool path_mismatch = false;
                 HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
                 if (hProc) {
                     char path_buf[MAX_PATH] = {};
                     if (GetModuleFileNameExA(hProc, nullptr, path_buf, MAX_PATH)) {
                         std::string actual_path = path_buf;
-                        std::transform(actual_path.begin(), actual_path.end(),
-                                       actual_path.begin(), ::tolower);
-                        if (!actual_path.empty() && actual_path != target.expected_path) {
+                        std::transform(actual_path.begin(), actual_path.end(), actual_path.begin(), ::tolower);
+                        if (!actual_path.empty() && actual_path != expected_path) {
                             anomalies.push_back(t("fake_path", actual_path));
-                            has_path_mismatch = true;
+                            path_mismatch = true;
                         }
-                    } else {
-                        // Path unreadable: flag for non-svchost processes only.
-                        // For svchost.exe, unreadable path alone is NOT enough evidence —
-                        // we must avoid false positives that could BSOD the system.
-                        if (target.name != "svchost.exe") {
-                            anomalies.push_back(t("path_unreadable"));
-                        }
+                    } else if (target_name != "svchost.exe") {
+                        anomalies.push_back(t("path_unreadable"));
                     }
                     CloseHandle(hProc);
                 }
 
-                // For svchost.exe we require confirmed path mismatch before
-                // marking the process as suspicious (to prevent BSOD on kill).
                 bool should_flag = !anomalies.empty();
-                if (target.name == "svchost.exe" && !has_path_mismatch) {
-                    should_flag = false;
-                }
+                if (target_name == "svchost.exe" && !path_mismatch) should_flag = false;
 
                 if (should_flag) {
-                    tehdit(t("hollow_proc", target.name, std::to_string(pid)));
-                    for (auto& a : anomalies)
-                        bilgi("  \u2514\u2500 " + C::YELLOW + a + C::RESET);
-                    ProcessInfo pi{pid, target.name, ""};
-                    for (auto& a : anomalies) pi.reason += a + "; ";
+                    tehdit(t("hollow_proc", target_name, std::to_string(pid)));
+                    std::string reason = "";
+                    for (size_t a = 0; a < anomalies.size(); ++a) {
+                        bilgi("  \u2514\u2500 " + C::YELLOW + anomalies[a] + C::RESET);
+                        reason += anomalies[a] + "; ";
+                    }
+                    ProcessInfo pi = {pid, target_name, reason};
                     result.found.push_back(pi);
                 }
             } while (Process32NextW(hSnap, &pe));
@@ -337,260 +323,135 @@ inline HollowResult hollow_scan() {
     std::cout << "\n";
     if (result.found.empty()) basari(t("hollow_clean"));
     else {
-        std::cout << "  " << C::RED << "  \u26a0  " << t("hollow_found", result.found.size())
-                  << C::RESET << "\n";
+        std::cout << "  " << C::RED << "  \u26a0  " << t("hollow_found", std::to_string(result.found.size())) << C::RESET << "\n";
     }
     return result;
 }
 
-struct DnsResult {
-    std::vector<ProcessInfo> found;
-};
-
-// Checks active TCP connections for established sessions from Luckyware target
-// processes to dns.google IPs (8.8.8.8 / 8.8.4.4) on port 443 (DNS-over-HTTPS).
+struct DnsResult { std::vector<ProcessInfo> found; };
 inline DnsResult dns_bypass_scan() {
     DnsResult result;
     section(t("dns_title"));
     bilgi(t("dns_checking"));
 
-    static const std::set<DWORD> doh_ips_v4 = {
-        0x08080808, // 8.8.8.8
-        0x08080404, // 8.8.4.4
-    };
+    static const DWORD doh_ips[] = { 0x08080808, 0x08080404 };
     const WORD DOH_PORT = 443;
-
     auto proc_list = get_process_list();
-
-    static const std::set<std::string> luckyware_procs = {
-        "dllhost.exe", "svchost.exe", "fontdrvhost.exe",
-        "disksnapshot.exe", "ktmutil.exe", "icacls.exe"
-    };
+    static const char* lucky_arr[] = { "dllhost.exe", "svchost.exe", "fontdrvhost.exe", "disksnapshot.exe", "ktmutil.exe", "icacls.exe" };
+    std::set<std::string> lucky_procs;
+    for (int i = 0; i < 6; ++i) lucky_procs.insert(lucky_arr[i]);
 
     DWORD size = 0;
     GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-    if (size == 0) {
-        basari(t("dns_clean"));
-        return result;
-    }
-
-    std::vector<BYTE> buffer(size);
-    if (GetExtendedTcpTable(buffer.data(), &size, FALSE, AF_INET,
-                             TCP_TABLE_OWNER_PID_ALL, 0) != NO_ERROR) {
-        basari(t("dns_clean"));
-        return result;
-    }
-
-    auto* table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID*>(buffer.data());
-    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
-        auto& row = table->table[i];
-        if (row.dwState != MIB_TCP_STATE_ESTAB) continue;
-        WORD remote_port = ntohs((WORD)row.dwRemotePort);
-        if (remote_port != DOH_PORT) continue;
-        DWORD remote_ip = ntohl(row.dwRemoteAddr);
-        if (!doh_ips_v4.count(remote_ip)) continue;
-
-        DWORD pid = row.dwOwningPid;
-        std::string proc_name = proc_list.count(pid) ? proc_list[pid] : "unknown";
-
-        if (luckyware_procs.count(proc_name)) {
-            tehdit(t("dns_found", std::to_string(pid), proc_name));
-            bilgi("  \u2514\u2500 " + t("dns_bypass_active"));
-
-            char ip_str[16];
-            inet_ntop(AF_INET, &row.dwRemoteAddr, ip_str, sizeof(ip_str));
-            bilgi("  \u2514\u2500 " + t("dns_target", std::string(ip_str)));
-
-            ProcessInfo pi{pid, proc_name, "dns_doh_bypass"};
-            result.found.push_back(pi);
+    if (size > 0) {
+        std::vector<BYTE> buffer(size);
+        if (GetExtendedTcpTable(buffer.data(), &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+            auto* table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID*>(buffer.data());
+            for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                auto& row = table->table[i];
+                if (row.dwState != MIB_TCP_STATE_ESTAB) continue;
+                if (ntohs((WORD)row.dwRemotePort) != DOH_PORT) continue;
+                DWORD r_ip = ntohl(row.dwRemoteAddr);
+                if (r_ip == doh_ips[0] || r_ip == doh_ips[1]) {
+                    DWORD pid = row.dwOwningPid;
+                    std::string p_name = proc_list.count(pid) ? proc_list[pid] : "unknown";
+                    if (lucky_procs.count(p_name)) {
+                        tehdit(t("dns_found", std::to_string(pid), p_name));
+                        char ip_s[16]; inet_ntop(AF_INET, &row.dwRemoteAddr, ip_s, 16);
+                        bilgi("  \u2514\u2500 " + t("dns_target", std::string(ip_s)));
+                        ProcessInfo pi = {pid, p_name, "dns_doh_bypass"};
+                        result.found.push_back(pi);
+                    }
+                }
+            }
         }
     }
-
     std::cout << "\n";
     if (result.found.empty()) basari(t("dns_clean"));
-    else {
-        tehdit(t("dns_found_count", result.found.size()));
-    }
+    else tehdit(t("dns_found_count", std::to_string(result.found.size())));
     return result;
 }
 
-struct RegistryResult {
-    std::vector<std::string> found_keys;
-};
-
+struct RegistryResult { std::vector<std::string> found_keys; };
 inline RegistryResult registry_scan() {
     RegistryResult result;
     section(t("registry_title"));
     bilgi(t("registry_checking"));
-
-    std::regex zararli_re(Obf::registry_regex_pattern(), std::regex::icase);
-
-    struct HiveInfo {
-        HKEY hive;
-        std::string path;
-    };
-    std::vector<HiveInfo> hive_paths = {
+    std::regex re(Obf::registry_regex_pattern(), std::regex::icase);
+    struct HiveInfo { HKEY hive; const char* path; };
+    HiveInfo hives[4] = {
         {HKEY_CURRENT_USER,  "Software\\Microsoft\\Windows\\CurrentVersion\\Run"},
         {HKEY_CURRENT_USER,  "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce"},
         {HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"},
-        {HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"},
-        {HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run"},
+        {HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"}
     };
-
-    for (auto& hi : hive_paths) {
-        HKEY hkey = nullptr;
-        if (RegOpenKeyExA(hi.hive, hi.path.c_str(), 0,
-                          KEY_READ, &hkey) != ERROR_SUCCESS) continue;
-
-        DWORD index = 0;
-        char name[256] = {};
-        BYTE data[2048] = {};
+    for (int i = 0; i < 4; ++i) {
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExA(hives[i].hive, hives[i].path, 0, KEY_READ, &hKey) != ERROR_SUCCESS) continue;
+        DWORD idx = 0;
+        char name[256]; BYTE data[2048];
         while (true) {
-            DWORD name_len = sizeof(name);
-            DWORD data_len = sizeof(data);
-            DWORD type;
-            if (RegEnumValueA(hkey, index++, name, &name_len, nullptr,
-                              &type, data, &data_len) != ERROR_SUCCESS) break;
-
-            std::string val(reinterpret_cast<char*>(data), data_len);
-            if (std::regex_search(val, zararli_re)) {
-                std::string key_path = hi.path + "\\" + name;
-                uyari(t("registry_found", key_path,
-                         val.size() > 80 ? val.substr(0, 80) + "..." : val));
-                result.found_keys.push_back(key_path);
+            DWORD nLen = 256, dLen = 2048, type;
+            if (RegEnumValueA(hKey, idx++, name, &nLen, nullptr, &type, data, &dLen) != ERROR_SUCCESS) break;
+            std::string val(reinterpret_cast<char*>(data), dLen);
+            if (std::regex_search(val, re)) {
+                std::string k_path = std::string(hives[i].path) + "\\" + name;
+                uyari(t("registry_found", k_path, val.size() > 80 ? val.substr(0, 80) : val));
+                result.found_keys.push_back(k_path);
             }
-            std::memset(name, 0, sizeof(name));
-            std::memset(data, 0, sizeof(data));
         }
-        RegCloseKey(hkey);
+        RegCloseKey(hKey);
     }
-
     if (result.found_keys.empty()) basari(t("registry_clean"));
     return result;
 }
 
 inline bool enable_debug_privilege_det() {
     HANDLE hToken;
-    if (!OpenProcessToken(GetCurrentProcess(),
-                          TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
-        return false;
-
-    LUID luid;
-    if (!LookupPrivilegeValueA(nullptr, "SeDebugPrivilege", &luid)) {
-        CloseHandle(hToken);
-        return false;
-    }
-
-    TOKEN_PRIVILEGES tp{};
-    tp.PrivilegeCount           = 1;
-    tp.Privileges[0].Luid       = luid;
-    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-
-    bool ok = AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp),
-                                    nullptr, nullptr) &&
-              GetLastError() == ERROR_SUCCESS;
-    CloseHandle(hToken);
-    return ok;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) return false;
+    LUID luid; LookupPrivilegeValueA(nullptr, "SeDebugPrivilege", &luid);
+    TOKEN_PRIVILEGES tp; tp.PrivilegeCount = 1; tp.Privileges[0].Luid = luid; tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp), nullptr, nullptr);
+    CloseHandle(hToken); return true;
 }
 
 inline int kill_processes(const std::map<DWORD, std::string>& pids) {
-    section(t("kill_title"));
-    if (pids.empty()) {
-        bilgi(t("kill_none"));
-        return 0;
-    }
-    // Enable SeDebugPrivilege so we can terminate SYSTEM / PPL-light processes
-    // such as svchost.exe that have been injected by the malware loader.
-    enable_debug_privilege_det();
-
+    if (pids.empty()) return 0;
+    section(t("kill_title")); enable_debug_privilege_det();
     int killed = 0;
-    for (auto& [pid, name] : pids) {
-        HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-        if (h) {
-            if (TerminateProcess(h, 1)) {
-                basari(t("kill_success", std::to_string(pid), name));
-                ++killed;
-            } else {
-                uyari(t("kill_fail", std::to_string(pid)));
-            }
-            CloseHandle(h);
-        } else {
-            uyari(t("kill_fail", std::to_string(pid)));
-        }
+    for (std::map<DWORD, std::string>::const_iterator it = pids.begin(); it != pids.end(); ++it) {
+        HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, it->first);
+        if (h) { if (TerminateProcess(h, 1)) { basari(t("kill_success", std::to_string(it->first), it->second)); ++killed; } CloseHandle(h); }
     }
-    if (killed > 0)
-        bilgi(t("kill_count", std::to_string(killed)));
     return killed;
 }
 
-struct C2Result {
-    std::vector<std::string> found_domains;
-};
-
-// Resolves each domain via getaddrinfo. If it resolves to anything other than
-// 0.0.0.0 the domain is not blocked in HOSTS and is added to found_domains.
+struct C2Result { std::vector<std::string> found_domains; };
 inline C2Result github_c2_check(const std::vector<std::string>& domains) {
     C2Result result;
-    bilgi(t("c2_github_check"));
-
-    for (auto& domain : domains) {
-        if (domain.empty()) continue;
-        struct addrinfo* res = nullptr;
-        struct addrinfo hints{};
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-        if (getaddrinfo(domain.c_str(), "80", &hints, &res) == 0) {
-            char ip[INET6_ADDRSTRLEN];
-            if (res->ai_family == AF_INET) {
-                inet_ntop(AF_INET,
-                    &((struct sockaddr_in*)res->ai_addr)->sin_addr, ip, sizeof(ip));
-            } else {
-                inet_ntop(AF_INET6,
-                    &((struct sockaddr_in6*)res->ai_addr)->sin6_addr, ip, sizeof(ip));
-            }
-            std::string ip_str = ip;
-            if (ip_str != "0.0.0.0") {
-                uyari(t("c2_not_blocked", domain, ip_str));
-                result.found_domains.push_back(domain);
-            }
-            freeaddrinfo(res);
-        }
+    for (size_t i = 0; i < domains.size(); ++i) {
+        struct addrinfo *res = nullptr, hints{}; hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(domains[i].c_str(), "80", &hints, &res) == 0) { result.found_domains.push_back(domains[i]); freeaddrinfo(res); }
     }
     return result;
 }
 
 inline int block_domains(const std::vector<std::string>& domains) {
-    section(t("hosts_title"));
-    const std::string hosts_path = "C:\\Windows\\System32\\drivers\\etc\\hosts";
+    section(t("hosts_title")); int count = 0;
+    std::ofstream wf("C:\\Windows\\System32\\drivers\\etc\\hosts", std::ios::app);
+    for (size_t i = 0; i < domains.size(); ++i) { wf << "\n0.0.0.0 " << domains[i]; basari(t("hosts_blocked", domains[i])); ++count; }
+    return count;
+}
 
-    std::ifstream rf(hosts_path);
-    if (!rf.is_open()) {
-        hata(t("hosts_read_err"));
-        return 0;
+inline void check_system_integrity() {
+    section(t("sys_integrity_title"));
+    fs::path cp = "C:\\Windows\\System32\\cldapi.dll";
+    if (fs::exists(cp)) {
+        bilgi(t("checking_cldapi"));
+        PECheck::RcdResult r = PECheck::check_rcd_sections(cp.string());
+        if (r.found) { tehdit(t("cldapi_infected")); bilgi("  \u2514\u2500 " + r.reason); }
+        else basari(t("cldapi_clean"));
     }
-    std::string content((std::istreambuf_iterator<char>(rf)),
-                         std::istreambuf_iterator<char>());
-    rf.close();
-
-    int blocked = 0;
-    std::ofstream wf(hosts_path, std::ios::app);
-    if (!wf.is_open()) {
-        hata(t("hosts_write_err"));
-        return 0;
-    }
-
-    for (auto& domain : domains) {
-        if (domain.empty()) continue;
-        if (content.find(domain) == std::string::npos) {
-            wf << "\n0.0.0.0 " << domain;
-            basari(t("hosts_blocked", domain));
-            ++blocked;
-        }
-    }
-    wf.close();
-    if (blocked > 0)
-        bilgi(t("hosts_block_done", std::to_string(blocked)));
-    return blocked;
 }
 
 } // namespace Detector

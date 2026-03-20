@@ -23,6 +23,7 @@
 #include "scanner.hpp"
 #include "detector.hpp"
 #include "cleaner.hpp"
+#include "network.hpp"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -267,6 +268,23 @@ int main(int argc, char* argv[]) {
         scan_opts.debug        = args.debug;
         scan_opts.num_threads  = 8;
 
+        bool disconnect_net = false;
+        if (argc <= 1) {
+            std::cout << "\n";
+            std::string ans;
+            std::cout << t("ask_disconnect_network");
+            std::getline(std::cin, ans);
+            if (ans == "e" || ans == "y" || ans == "evet" || ans == "yes" || ans == "E" || ans == "Y") {
+                disconnect_net = true;
+            }
+        }
+
+        if (disconnect_net) {
+            Network::disconnect();
+        }
+
+        Detector::check_system_integrity();
+
         auto scan_start_time = std::chrono::steady_clock::now();
         auto scan_result = Scanner::scan_directory(args.scan_path, rules, scan_opts);
         auto& infected = scan_result.infected_files;
@@ -299,15 +317,18 @@ int main(int argc, char* argv[]) {
         std::map<DWORD, std::string> all_malicious_pids;
 
         auto mutex_res = Detector::mutex_scan();
-        for (auto& [pid, name] : mutex_res.malicious_pids)
-            all_malicious_pids[pid] = name;
-
+        for (std::map<DWORD, std::string>::iterator it = mutex_res.malicious_pids.begin(); it != mutex_res.malicious_pids.end(); ++it)
+            all_malicious_pids[it->first] = it->second;
+ 
         auto loader_res = Detector::loader_scan();
-        for (auto& pi : loader_res.found)
+        for (size_t i = 0; i < loader_res.found.size(); ++i) {
+            Detector::ProcessInfo& pi = loader_res.found[i];
             all_malicious_pids[pi.pid] = pi.name;
-
+        }
+ 
         auto hollow_res = Detector::hollow_scan();
-        for (auto& pi : hollow_res.found) {
+        for (size_t i = 0; i < hollow_res.found.size(); ++i) {
+            Detector::ProcessInfo& pi = hollow_res.found[i];
             if (pi.pid > 0) all_malicious_pids[pi.pid] = pi.name;
         }
 
@@ -325,8 +346,10 @@ int main(int argc, char* argv[]) {
         }
 
         auto dns_res = Detector::dns_bypass_scan();
-        for (auto& pi : dns_res.found)
+        for (size_t i = 0; i < dns_res.found.size(); ++i) {
+            Detector::ProcessInfo& pi = dns_res.found[i];
             all_malicious_pids[pi.pid] = pi.name;
+        }
 
         if (!args.skip_registry) {
             auto reg_res = Detector::registry_scan();
@@ -478,6 +501,8 @@ int main(int argc, char* argv[]) {
     } catch (...) {
         std::cout << "\n  " << C::RED << t("unknown_error") << C::RESET << "\n";
     }
+
+    Network::reconnect(); // Restoration
 
     std::cout << "\n";
     bilgi(t("press_enter"));

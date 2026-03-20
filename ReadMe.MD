@@ -25,13 +25,12 @@
 | ------------------ | ----------------------------- | --------------------------------------- |
 | 🌐 Language         | English & Turkish support     | İngilizce & Türkçe desteği              |
 | 🔍 YARA Scanner     | YARA-based malware detection  | YARA tabanlı zararlı tespit             |
-| 🧹 Auto Cleaner     | Reg, SDK, ImGui, Discord      | Reg, SDK, ImGui, Discord temizleme      |
-| 🛡️ PE Patch         | Disable malicious PE sections | Zararlı PE bölümlerini devre dışı bırak |
+| 🧹 Auto Cleaner     | Reg, SDK, ImGui, Discord, Temp| Reg, SDK, ImGui, Discord, Temp temizleme|
+| 📡 Network Ctrl     | Internet kill-switch during scan| Tarama sırasında internet kesme        |
+| 🛡️ Smart PE Scan    | Magic-byte based EXE detection| Magic-byte tabanlı EXE tespiti          |
 | 🚫 C2 Block         | Permanently block C2 domains  | C2 domainlerini kalıcı olarak engelle   |
-| ⚡ Multi-thread     | 8-thread parallel scanning    | 8 iş parçacıklı paralel tarama          |
-| 📊 Progress Bar     | Thread-safe live progress     | Çoklu iş parçacığı güvenli ilerleme     |
-| 🔄 Winget Reinstall | Auto reinstall affected apps  | Etkilenen uygulamaları otomatik kur     |
-| 💀 Interactive      | Guided threat cleanup prompts | Yönlendirilmiş tehdit temizleme         |
+| ⚡ Optimized        | Dynamic multi-threading & Cache| Dinamik çoklu işleme & Önbellek        |
+| 📋 Detailed Logs    | Shows matched malicious strings| Eşleşen zararlı dizeleri gösterir      |
 
 ---
 
@@ -77,6 +76,7 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 | `--clear-cache`    | Clears the SHA256 cache                         |
 | `--rules <file>`   | Specifies the YARA rules file path              |
 | `--lang tr\|en`    | Language selection                              |
+| `--network`        | Force internet disconnect during scan           |
 | `--debug`          | Enable debug output                             |
 
 </details>
@@ -215,6 +215,20 @@ LuckywareCleaner.exe C:\ --block --patch-pe --remove --full-clean
 
 ---
 
+### 🆕 Recent Major Updates / Son Temel Güncellemeler
+- **Advanced PE Detection**: No longer relies on extensions. Scans binary headers (`MZ`) of any file to find hidden payloads.
+- **Advanced PE Tespiti**: Artık uzantılara güvenmez. Gizli dosyaları bulmak için herhangi bir dosyanın ikili başlıklarını (`MZ`) tarar.
+- **Smart Script Cleaning**: Content-based verification for `.vbs` and `.ps1` files in `%TEMP%` to prevent false deletion of user scripts.
+- **Akıllı Betik Temizleme**: Kullanıcı dosyalarının yanlışlıkla silinmesini önlemek için `%TEMP%` içindeki `.vbs` ve `.ps1` dosyaları için içerik tabanlı doğrulama.
+- **Network Kill-Switch**: Optional internet disconnection during scans to prevent malware from communicating with C2 servers.
+- **Ağ Kesici**: Zararlı yazılımın C2 sunucularıyla iletişim kurmasını önlemek için tarama sırasında isteğe bağlı internet kesintisi.
+- **Deep VCXPROJ Scan**: Detects sophisticated Base64/VBScript decoding chains in Visual Studio project files.
+- **Derin VCXPROJ Taraması**: Visual Studio proje dosyalarındaki karmaşık Base64/VBScript kod çözme zincirlerini tespit eder.
+- **Improved Transparency**: Scanner now displays the specific malicious strings that triggered a YARA match.
+- **Gelişmiş Şeffaflık**: Tarayıcı artık bir YARA eşleşmesini tetikleyen belirli zararlı dizeleri görüntüler.
+
+---
+
 ## 📁 File Structure / Dosya Yapısı
 
 ```
@@ -223,10 +237,12 @@ Luckyware Cleaner Tool/
 ├── 📄 scanner.hpp/.cpp        # Multi-threaded file scanner / Dosya tarayıcı
 ├── 📄 detector.hpp/.cpp       # Threat detection engine / Tehdit tespit motoru
 ├── 📄 cleaner.hpp/.cpp        # Auto-cleaner module / Otomatik temizleyici
+├── 📄 network.hpp             # Network control module / İnternet kontrol modülü
 ├── 📄 yara_engine.hpp/.cpp    # YARA rule parser / YARA kural motoru
 ├── 📄 pe_check.hpp/.cpp       # PE file analysis / PE dosya analizi
 ├── 📄 ui.hpp                  # Console UI & progress bar / Konsol arayüzü
 ├── 📄 lang.hpp                # i18n translations / Dil çevirileri
+├── 📄 obfuscate.hpp           # String security module / Güvenli dize modülü
 ├── 📄 LuckywareCleaner.sln    # Visual Studio solution
 ├── 📄 LuckywareCleaner.vcxproj # Visual Studio project
 ├── 📄 CMakeLists.txt          # CMake build config
